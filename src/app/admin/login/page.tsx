@@ -175,9 +175,9 @@ export default function AdminLoginPage() {
                         {loading ? <Loader2 className="animate-spin" size={24} /> : 'INITIALIZE ACCESS'}
                     </button>
 
-                    <p style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '10px' }}>
+                    {/*<p style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '10px' }}>
                         Default security credentials: <strong>87654321</strong>
-                    </p>
+                    </p>*/}
                 </form>
             </div>
 

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Trophy, Shield, LayoutDashboard, User as UserIcon, ScrollText, Menu, X, Zap, LogOut } from 'lucide-react';
+import { Trophy, Shield, LayoutDashboard, User as UserIcon, ScrollText, Menu, X, Zap, LogOut, PieChart, Users, History as HistoryIcon } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -117,10 +117,27 @@ export default function Navbar() {
             </Link>
 
             {role === 'admin' && (
-                <Link href="/admin/dashboard" style={getNavLinkStyle('/admin/dashboard')} onClick={() => setIsMenuOpen(false)}>
-                    <Shield size={18} />
-                    <span>Admin Panel</span>
-                </Link>
+                <>
+                    <Link href="/admin/dashboard" style={getNavLinkStyle('/admin/dashboard')} onClick={() => setIsMenuOpen(false)}>
+                        <Shield size={18} />
+                        <span>Admin Panel</span>
+                    </Link>
+
+                    <Link href="/analytics" style={getNavLinkStyle('/analytics')} onClick={() => setIsMenuOpen(false)}>
+                        <PieChart size={18} />
+                        <span>Analytics</span>
+                    </Link>
+
+                    <Link href="/teams" style={getNavLinkStyle('/teams')} onClick={() => setIsMenuOpen(false)}>
+                        <Users size={18} />
+                        <span>Team Squads</span>
+                    </Link>
+
+                    <Link href="/auction-history" style={getNavLinkStyle('/auction-history')} onClick={() => setIsMenuOpen(false)}>
+                        <HistoryIcon size={18} />
+                        <span>History</span>
+                    </Link>
+                </>
             )}
 
             {user ? (

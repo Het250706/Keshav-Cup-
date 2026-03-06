@@ -399,11 +399,34 @@ export default function AuctionRoom({
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                        <div style={{ padding: '20px', borderRadius: '20px', textAlign: 'center', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)' }}>
+                        <div style={{ padding: '20px', borderRadius: '20px', textAlign: 'center', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', position: 'relative', overflow: 'hidden' }}>
                             <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '8px' }}>AUCTION STATUS</div>
                             <div style={{ fontSize: '2.2rem', fontWeight: 900, color: auctionState.status === 'active' ? '#00ff80' : 'var(--primary)', letterSpacing: '1px' }}>
                                 {auctionState.status.toUpperCase()}
                             </div>
+
+                            {auctionState.status === 'active' && (
+                                <div style={{ marginTop: '20px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                                        <Timer size={18} color={auctionState.timer_remaining <= 10 ? '#ff4b4b' : 'var(--primary)'} className={auctionState.timer_remaining <= 10 ? 'pulse' : ''} />
+                                        <div style={{ fontSize: '2.5rem', fontWeight: 950, color: auctionState.timer_remaining <= 10 ? '#ff4b4b' : '#fff', fontFamily: 'monospace' }}>
+                                            00:{auctionState.timer_remaining.toString().padStart(2, '0')}
+                                        </div>
+                                    </div>
+                                    <div style={{ height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
+                                        <motion.div
+                                            initial={false}
+                                            animate={{ width: `${(auctionState.timer_remaining / (auctionState.timer_duration || 30)) * 100}%` }}
+                                            transition={{ duration: 1, ease: 'linear' }}
+                                            style={{
+                                                height: '100%',
+                                                background: auctionState.timer_remaining <= 10 ? '#ff4b4b' : 'var(--primary)',
+                                                boxShadow: auctionState.timer_remaining <= 10 ? '0 0 15px rgba(255, 75, 75, 0.5)' : '0 0 15px var(--primary-glow)'
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div className="glass" style={{ flex: 1, padding: '20px', borderRadius: '20px', display: 'flex', flexDirection: 'column', minHeight: '200px' }}>
