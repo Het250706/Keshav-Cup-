@@ -18,20 +18,29 @@ export default function MatchDetailPage() {
     const [activeTab, setActiveTab] = useState<'team1' | 'team2'>('team1');
 
     useEffect(() => {
-        if (id) fetchMatchData();
+        if (id) {
+            fetchMatchData();
+
+            const matchChannel = supabase.channel(`public_match_${id}`)
+                .on('postgres_changes', { event: '*', table: 'match_events', schema: 'public', filter: `match_id=eq.${id}` }, async () => {
+                    const { data: ev } = await supabase.from('match_events').select('*, striker:players!striker_id(*), bowler:players!bowler_id(*), dismissed:players!dismissed_player_id(*)').eq('match_id', id).order('created_at', { ascending: true });
+                    if (ev) setEvents(ev);
+                })
+                .on('postgres_changes', { event: '*', table: 'innings', schema: 'public', filter: `match_id=eq.${id}` }, async () => {
+                    const { data: inn } = await supabase.from('innings').select('*').eq('match_id', id).order('innings_number', { ascending: true });
+                    if (inn) setInnings(inn);
+                })
+                .subscribe();
+
+            return () => { supabase.removeChannel(matchChannel); };
+        }
     }, [id]);
 
     const fetchMatchData = async () => {
         setLoading(true);
-        const { data: m } = await supabase.from('matches').select('*, team_a:teams!team_a_id(*), team_b:teams!team_b_id(*)').eq('id', id).single();
+        const { data: m } = await supabase.from('matches').select('*, team1:teams!team1_id(*), team2:teams!team2_id(*)').eq('id', id).single();
         if (m) {
             setMatch(m);
-            const [{ data: inn }, { data: ev }] = await Promise.all([
-                supabase.from('innings').select('*').eq('match_id', id).order('innings_number', { ascending: true }),
-                supabase.from('match_events').select('*, striker:players!striker_id(*), bowler:players!bowler_id(*), dismissed:players!dismissed_player_id(*)').eq('match_id', id).order('created_at', { ascending: true })
-            ]);
-            if (inn) setInnings(inn);
-            if (ev) setEvents(ev);
         }
         setLoading(false);
     };
@@ -69,7 +78,7 @@ export default function MatchDetailPage() {
                 <div className="glass" style={{ padding: '40px', borderRadius: '35px', marginBottom: '30px', textAlign: 'center' }}>
                     <div style={{ color: 'var(--primary)', fontWeight: 900, marginBottom: '10px', fontSize: '0.8rem', letterSpacing: '2px' }}>{match.match_name.toUpperCase()}</div>
                     <h1 style={{ fontSize: 'clamp(1.5rem, 5vw, 2.5rem)', fontWeight: 950, marginBottom: '20px' }}>
-                        {match.team_a?.name} <span style={{ color: 'var(--text-muted)', fontSize: '1rem', margin: '0 10px' }}>VS</span> {match.team_b?.name}
+                        {match.team1?.name} <span style={{ color: 'var(--text-muted)', fontSize: '1rem', margin: '0 10px' }}>VS</span> {match.team2?.name}
                     </h1>
                     
                     {match.status === 'completed' && match.winner_team_id && (
@@ -89,14 +98,14 @@ export default function MatchDetailPage() {
                         className={activeTab === 'team1' ? 'btn-primary' : 'btn-secondary'}
                         style={{ padding: '20px', fontSize: '1rem', fontWeight: 900, borderRadius: '20px' }}
                     >
-                        {match.team_a?.name.toUpperCase()}
+                        {match.team1?.name.toUpperCase()}
                     </button>
                     <button 
                         onClick={() => setActiveTab('team2')}
                         className={activeTab === 'team2' ? 'btn-primary' : 'btn-secondary'}
                         style={{ padding: '20px', fontSize: '1rem', fontWeight: 900, borderRadius: '20px' }}
                     >
-                        {match.team_b?.name.toUpperCase()}
+                        {match.team2?.name.toUpperCase()}
                     </button>
                 </div>
 
@@ -106,11 +115,7 @@ export default function MatchDetailPage() {
                     initial={{ opacity: 0, x: activeTab === 'team1' ? -20 : 20 }}
                     animate={{ opacity: 1, x: 0 }}
                 >
-                    <MatchScorecard 
-                        teamId={activeTab === 'team1' ? match.team_a_id : match.team_b_id}
-                        teamName={activeTab === 'team1' ? match.team_a?.name : match.team_b?.name}
-                        events={events}
-                    />
+                    <MatchScorecard matchId={id as string} />
                 </motion.div>
 
             </div>

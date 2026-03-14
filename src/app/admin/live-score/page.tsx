@@ -42,8 +42,8 @@ function AdminLiveScoreContent() {
     const [formData, setFormData] = useState({
         match_name: '',
         match_type: 'League Match',
-        team_a_id: '',
-        team_b_id: '',
+        team1_id: '',
+        team2_id: '',
         venue: 'Main Stadium',
         max_overs: '8'
     });
@@ -57,6 +57,7 @@ function AdminLiveScoreContent() {
     const [currentInnings, setCurrentInnings] = useState<any>(null);
     const [strikerId, setStrikerId] = useState('');
     const [bowlerId, setBowlerId] = useState('');
+    const [previousBowlerId, setPreviousBowlerId] = useState('');
     const [showWicketModal, setShowWicketModal] = useState(false);
     const [selectedWicketType, setSelectedWicketType] = useState('Bowled');
     const [dismissedId, setDismissedId] = useState('');
@@ -71,14 +72,46 @@ function AdminLiveScoreContent() {
         if (!teamId) return 'TBD';
         const team = teams?.find(t => t.id === teamId);
         if (team?.name) return team.name;
-        if (teamId === activeMatch?.team_a_id && activeMatch?.team_a?.name) return activeMatch.team_a.name;
-        if (teamId === activeMatch?.team_b_id && activeMatch?.team_b?.name) return activeMatch.team_b.name;
-        return teamId === activeMatch?.team_a_id ? 'Team A' : 'Team B';
+        if (teamId === activeMatch?.team1_id && activeMatch?.team1?.name) return activeMatch.team1.name;
+        if (teamId === activeMatch?.team2_id && activeMatch?.team2?.name) return activeMatch.team2.name;
+        return teamId === activeMatch?.team1_id ? 'Team 1' : 'Team 2';
     };
 
     useEffect(() => {
         init();
+
+        const channel = supabase.channel('admin_livescore_system')
+            .on('postgres_changes', { event: '*', table: 'match_events', schema: 'public' }, () => {
+                fetchTournamentStats();
+            })
+            .on('postgres_changes', { event: '*', table: 'matches', schema: 'public' }, () => {
+                fetchMatches();
+            })
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
     }, []);
+
+    useEffect(() => {
+        if (!activeMatch?.id) return;
+        const matchChannel = supabase.channel(`admin_match_${activeMatch.id}`)
+            .on('postgres_changes', { event: '*', table: 'match_events', schema: 'public', filter: `match_id=eq.${activeMatch.id}` }, () => {
+                fetchMatchEvents(activeMatch.id);
+            })
+            .on('postgres_changes', { event: '*', table: 'innings', schema: 'public', filter: `match_id=eq.${activeMatch.id}` }, async () => {
+                const { data: inn } = await supabase
+                    .from('innings')
+                    .select('*')
+                    .eq('match_id', activeMatch.id)
+                    .order('innings_number', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                if (inn) setCurrentInnings(inn);
+            })
+            .subscribe();
+
+        return () => { supabase.removeChannel(matchChannel); };
+    }, [activeMatch?.id]);
 
     const init = async () => {
         setLoading(true);
@@ -92,11 +125,11 @@ function AdminLiveScoreContent() {
     };
 
     const fetchMatches = async () => {
-        const { data, error } = await supabase.from('matches').select('*, team_a:teams!team_a_id(name), team_b:teams!team_b_id(name)').order('created_at', { ascending: false });
+        const { data, error } = await supabase.from('matches').select('*, team1:teams!team1_id(name), team2:teams!team2_id(name)').order('created_at', { ascending: false });
         if (error) {
             console.error('FETCH_MATCHES_ERROR:', error);
             if (error.code === 'PGRST204' || error.code === '42P01' || error.message.includes('not found')) {
-                alert('Database tables are missing! Please run the LIVESCORE_UPGRADE.sql script in your Supabase SQL Editor.');
+                alert('Database tables might be outdated! Please run the realtime_scoring_v2.sql script.');
             }
         }
         if (data) setMatches(data);
@@ -124,19 +157,15 @@ function AdminLiveScoreContent() {
     // --- VIEW HANDLERS ---
 
     const handleCreateMatch = async () => {
-        if (!formData.team_a_id || !formData.team_b_id || formData.team_a_id === formData.team_b_id) {
+        if (!formData.team1_id || !formData.team2_id || formData.team1_id === formData.team2_id) {
             alert('Please select two different teams');
             return;
         }
 
         const { data, error } = await supabase.from('matches').insert([{
-            match_name: formData.match_name,
-            match_type: formData.match_type,
-            team_a_id: formData.team_a_id,
-            team_b_id: formData.team_b_id,
-            venue: formData.venue,
-            max_overs: parseInt(formData.max_overs),
-            status: 'scheduled'
+            team1_id: formData.team1_id,
+            team2_id: formData.team2_id,
+            status: 'live'
         }]).select().single();
 
         if (error) {
@@ -176,7 +205,7 @@ function AdminLiveScoreContent() {
                 if (inn1) setFirstInningsRuns(inn1.runs);
             }
             if (match.status === 'completed') {
-                setScoringTab('team_a');
+                setScoringTab('team_a'); // Tab names can remain as identifiers or change
             } else {
                 setScoringTab('live');
             }
@@ -209,30 +238,18 @@ function AdminLiveScoreContent() {
         setSelectedSquadB([]);
 
         try {
-            // Get team details for name-based lookup fallback
-            const { data: tA } = await supabase.from('teams').select('name').eq('id', match.team_a_id).single();
-            const { data: tB } = await supabase.from('teams').select('name').eq('id', match.team_b_id).single();
+            // Get team details
+            const { data: t1 } = await supabase.from('teams').select('id, name').eq('id', match.team1_id).single();
+            const { data: t2 } = await supabase.from('teams').select('id, name').eq('id', match.team2_id).single();
 
-            // Broad search for Team A players (matches by UUID OR by Name)
-            let qA = supabase.from('players').select('*');
-            if (tA?.name) {
-                qA = qA.or(`team_id.eq.${match.team_a_id},sold_team.eq."${tA.name}"`);
-            } else {
-                qA = qA.eq('team_id', match.team_a_id);
-            }
-            const { data: pA } = await qA;
+            // Fetch players for Team 1
+            const { data: p1 } = await supabase.from('players').select('*').eq('team_id', match.team1_id);
+            
+            // Fetch players for Team 2
+            const { data: p2 } = await supabase.from('players').select('*').eq('team_id', match.team2_id);
 
-            // Broad search for Team B players
-            let qB = supabase.from('players').select('*');
-            if (tB?.name) {
-                qB = qB.or(`team_id.eq.${match.team_b_id},sold_team.eq."${tB.name}"`);
-            } else {
-                qB = qB.eq('team_id', match.team_b_id);
-            }
-            const { data: pB } = await qB;
-
-            if (pA) setTeamAPlayers(pA);
-            if (pB) setTeamBPlayers(pB);
+            if (p1) setTeamAPlayers(p1);
+            if (p2) setTeamBPlayers(p2);
         } catch (err) {
             console.error('PREPARE_SQUAD_ERROR:', err);
         }
@@ -246,14 +263,14 @@ function AdminLiveScoreContent() {
         }
 
         const matchPlayers = [
-            ...selectedSquadA.map(pid => ({ match_id: activeMatch.id, player_id: pid, team_id: activeMatch.team_a_id })),
-            ...selectedSquadB.map(pid => ({ match_id: activeMatch.id, player_id: pid, team_id: activeMatch.team_b_id }))
+            ...selectedSquadA.map(pid => ({ match_id: activeMatch.id, player_id: pid, team_id: activeMatch.team1_id })),
+            ...selectedSquadB.map(pid => ({ match_id: activeMatch.id, player_id: pid, team_id: activeMatch.team2_id }))
         ];
 
         const { error } = await supabase.from('match_players').insert(matchPlayers);
         if (error) {
-            console.error(error);
-            alert('Error saving squads');
+            console.error('SAVE_SQUAD_ERROR:', error);
+            alert(`Error saving squads: ${error.message} (Code: ${error.code})`);
         } else {
             setView('toss');
         }
@@ -267,10 +284,10 @@ function AdminLiveScoreContent() {
 
         let battingFirstId = tossData.toss_winner_id;
         if (tossData.toss_decision === 'Bowling') {
-            battingFirstId = tossData.toss_winner_id === activeMatch.team_a_id ? activeMatch.team_b_id : activeMatch.team_a_id;
+            battingFirstId = tossData.toss_winner_id === activeMatch.team1_id ? activeMatch.team2_id : activeMatch.team1_id;
         }
 
-        const bowlingFirstId = battingFirstId === activeMatch.team_a_id ? activeMatch.team_b_id : activeMatch.team_a_id;
+        const bowlingFirstId = battingFirstId === activeMatch.team1_id ? activeMatch.team2_id : activeMatch.team1_id;
 
         const { error } = await supabase.from('matches').update({
             toss_winner_id: tossData.toss_winner_id,
@@ -279,18 +296,25 @@ function AdminLiveScoreContent() {
             status: 'live'
         }).eq('id', activeMatch.id);
 
-        if (error) alert('Error saving toss');
+        if (error) {
+            console.error('SAVE_TOSS_ERROR:', error);
+            alert(`Error saving toss: ${error.message} (Code: ${error.code}). Full Error: ${JSON.stringify(error)}`);
+        }
         else {
             const { data: inn, error: innError } = await supabase.from('innings').insert([{
                 match_id: activeMatch.id,
                 innings_number: 1,
                 batting_team_id: battingFirstId,
-                bowling_team_id: bowlingFirstId
+                bowling_team_id: bowlingFirstId,
+                is_completed: false
             }]).select().single();
 
             if (innError) alert('Error initializing innings');
             else {
                 setCurrentInnings(inn);
+                setStrikerId('');
+                setBowlerId('');
+                setPreviousBowlerId('');
                 await fetchMatchSquad(activeMatch);
                 setView('scoring');
             }
@@ -301,8 +325,8 @@ function AdminLiveScoreContent() {
         if (!match) return;
         const { data } = await supabase.from('match_players').select('*, players(*)').eq('match_id', match.id);
         if (data) {
-            setMatchPlayersA(data.filter((p: any) => p.team_id === match.team_a_id).map((p: any) => p.players));
-            setMatchPlayersB(data.filter((p: any) => p.team_id === match.team_b_id).map((p: any) => p.players));
+            setMatchPlayersA(data.filter((p: any) => p.team_id === match.team1_id).map((p: any) => p.players));
+            setMatchPlayersB(data.filter((p: any) => p.team_id === match.team2_id).map((p: any) => p.players));
         }
     };
 
@@ -327,8 +351,8 @@ function AdminLiveScoreContent() {
 
     // --- SCORING ACTIONS ---
 
-    const recordBall = async (runs: number, isWicket: boolean = false, extraType: 'none' | 'wide' | 'nb' = 'none') => {
-        if (!strikerId || !bowlerId || !currentInnings) {
+    const recordBall = async (runs: number, isWicket: boolean = false, extraType: 'run' | 'four' | 'six' | 'wicket' | 'wide' | 'no_ball' = 'run') => {
+        if (!strikerId || !bowlerId || !activeMatch) {
             alert('Please select striker and bowler');
             return;
         }
@@ -339,84 +363,46 @@ function AdminLiveScoreContent() {
             return;
         }
 
-        const isLegalBall = extraType === 'none';
-        const extraRuns = (extraType === 'wide' || extraType === 'nb') ? 1 : 0;
-        const totalBallRuns = runs + extraRuns;
+        // Determine event type if not provided correctly
+        let finalEventType = extraType;
+        if (isWicket) finalEventType = 'wicket';
+        else if (runs === 4 && extraType === 'run') finalEventType = 'four';
+        else if (runs === 6 && extraType === 'run') finalEventType = 'six';
 
-        // 1. Calculate Score & Overs
-        const newRuns = (currentInnings.runs || 0) + totalBallRuns;
-        const newWickets = (currentInnings.wickets || 0) + (isWicket ? 1 : 0);
-        
-        let currentOvers = currentInnings.overs || 0;
-        let oversInt = Math.floor(currentOvers);
-        let balls = Math.round((currentOvers - oversInt) * 10);
-        
-        if (isLegalBall) {
-            balls++;
-            if (balls >= 6) {
-                oversInt++;
-                balls = 0;
-            }
-        }
-        const nextOver = oversInt + (balls / 10);
-
-        // 2. Update Innings in DB
-        const { error: innErr } = await supabase.from('innings').update({
-            runs: newRuns,
-            wickets: newWickets,
-            overs: nextOver
-        }).eq('id', currentInnings.id);
-
-        if (innErr) { alert('Error updating scoreboard'); return; }
-
-        // 3. Record Event
-        await supabase.from('match_events').insert([{
+        // 1. Record Event (Triggers in DB will handle updating team_scores and player_match_stats)
+        const { data: event, error: eventErr } = await supabase.from('match_events').insert([{
             match_id: activeMatch.id,
-            innings_number: currentInnings.innings_number,
-            striker_id: strikerId,
+            innings_id: currentInnings.id,
+            over_number: Math.floor(currentInnings?.overs || 0),
+            ball_number: Math.round(((currentInnings?.overs || 0) % 1) * 10) + 1,
+            batsman_id: strikerId,
             bowler_id: bowlerId,
-            runs_off_bat: (extraType === 'none' || extraType === 'nb') ? runs : 0,
-            extras: extraRuns + (extraType === 'none' ? 0 : runs),
-            extra_type: extraType !== 'none' ? extraType : null,
+            runs: runs,
             is_wicket: isWicket,
-            wicket_type: isWicket ? selectedWicketType : null,
-            dismissed_player_id: isWicket ? dismissedId : null,
-            over_number: Math.floor(nextOver),
-            ball_number: balls || 6
-        }]);
+            event_type: finalEventType
+        }]).select().single();
 
-        fetchMatchEvents(activeMatch.id);
-
-        // 4. Refresh State & Check For Innings Completion / Target Reached
-        const { data: refreshedInn } = await supabase.from('innings').select('*').eq('id', currentInnings.id).single();
-        if (refreshedInn) {
-            setCurrentInnings(refreshedInn);
-            const maxOvers = activeMatch?.max_overs || 8;
-            
-            // Auto-detect Over Completion
-            if (isLegalBall && balls === 0) {
-                alert('Over completed! Please change the bowler.');
-                setBowlerId('');
-            }
-
-            // Check Target Reached (2nd Innings)
-            if (refreshedInn.innings_number === 2 && firstInningsRuns !== null) {
-                if (refreshedInn.runs > firstInningsRuns) {
-                    alert('TARGET REACHED! MATCH ENDED.');
-                    await endInnings();
-                    return;
-                }
-            }
-
-            if (refreshedInn.overs >= maxOvers) {
-                alert('Innings Complete! Overs Finished.');
-                endInnings();
-            }
+        if (eventErr) {
+            console.error('RECORD_BALL_ERROR:', eventErr);
+            alert(`Error recording ball: ${eventErr.message}`);
+            return;
         }
 
+        // 2. Refresh local events
+        fetchMatchEvents(activeMatch.id);
+        
+        // 3. Handle Over Completion / Wicket
         if (isWicket) {
             setShowWicketModal(false);
             setStrikerId('');
+        }
+
+        const isLegalBall = extraType !== 'wide' && extraType !== 'no_ball';
+        const currentBalls = Math.round(((currentInnings?.overs || 0) % 1) * 10);
+        if (isLegalBall && currentBalls === 5) {
+            alert('Over Completed! Please select a NEW bowler.');
+            setPreviousBowlerId(bowlerId);
+            setBowlerId('');
         }
     };
 
@@ -504,12 +490,14 @@ function AdminLiveScoreContent() {
                     overs: 0.0
                 }]).select().single();
 
-                if (insertErr) {
-                    console.error('START_INN2_ERROR:', insertErr);
-                    alert(`Database Error starting 2nd innings: ${insertErr.message}`);
+                if (insertErr || !inn2) {
+                    alert('Error creating second innings');
                 } else {
                     setCurrentInnings(inn2);
-                    alert('1st Innings Completed! Starting 2nd Innings...');
+                    setStrikerId('');
+                    setBowlerId('');
+                    setPreviousBowlerId('');
+                    alert("First innings completed! Ready for second innings.");
                 }
             } else {
                 // ... logic for match completion
@@ -539,7 +527,8 @@ function AdminLiveScoreContent() {
                 // Update Match Status
                 const { error: matchErr } = await supabase.from('matches').update({
                     status: 'completed',
-                    winner_team_id: matchWinnerId
+                    winner_team_id: matchWinnerId,
+                    result_message: resultMessage
                 }).eq('id', activeMatch.id);
 
                 if (matchErr) {
@@ -562,8 +551,8 @@ function AdminLiveScoreContent() {
 
     const downloadReport = async (match: any) => {
         const { data: stats } = await supabase.from('player_match_stats').select('*, players(*)').eq('match_id', match.id);
-        const { data: teamA } = await supabase.from('teams').select('name').eq('id', match.team_a_id).single();
-        const { data: teamB } = await supabase.from('teams').select('name').eq('id', match.team_b_id).single();
+        const { data: teamA } = await supabase.from('teams').select('name').eq('id', match.team1_id).single();
+        const { data: teamB } = await supabase.from('teams').select('name').eq('id', match.team2_id).single();
         const { data: tossWinner } = await supabase.from('teams').select('name').eq('id', match.toss_winner_id).single();
         const { data: matchWinner } = await supabase.from('teams').select('name').eq('id', match.winner_team_id).single();
 
@@ -572,7 +561,7 @@ function AdminLiveScoreContent() {
         let csv = 'Team Name,Player Name,Runs Scored,Wickets Taken,Overs Bowled,Batting Order,Bowling Order,Toss Winner,Toss Decision,Match Winner\n';
 
         stats.forEach((s: any) => {
-            const teamName = s.team_id === match.team_a_id ? teamA?.name : teamB?.name;
+            const teamName = s.team_id === match.team1_id ? teamA?.name : teamB?.name;
             csv += `${teamName},${s.players?.first_name} ${s.players?.last_name},${s.runs_scored},${s.wickets_taken},${s.overs_bowled},${s.batting_order || ''},${s.bowling_order || ''},${tossWinner?.name || ''},${match.toss_decision || ''},${matchWinner?.name || ''}\n`;
         });
 
@@ -683,11 +672,11 @@ function AdminLiveScoreContent() {
 
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: '20px', margin: '20px 0' }}>
                                             <div style={{ textAlign: 'center' }}>
-                                                <div style={{ fontSize: '1.1rem', fontWeight: 800 }}>{m.team_a?.name || 'TBD'}</div>
+                                                <div style={{ fontSize: '1.1rem', fontWeight: 800 }}>{m.team1?.name || 'TBD'}</div>
                                             </div>
                                             <div style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--text-muted)' }}>VS</div>
                                             <div style={{ textAlign: 'center' }}>
-                                                <div style={{ fontSize: '1.1rem', fontWeight: 800 }}>{m.team_b?.name || 'TBD'}</div>
+                                                <div style={{ fontSize: '1.1rem', fontWeight: 800 }}>{m.team2?.name || 'TBD'}</div>
                                             </div>
                                         </div>
 
@@ -792,15 +781,15 @@ function AdminLiveScoreContent() {
                                 </div>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px', marginBottom: '25px' }}>
                                     <div>
-                                        <label style={labelStyle}>TEAM A</label>
-                                        <select style={inputStyle} value={formData.team_a_id} onChange={e => setFormData({ ...formData, team_a_id: e.target.value })}>
+                                        <label style={labelStyle}>TEAM 1</label>
+                                        <select style={inputStyle} value={formData.team1_id} onChange={e => setFormData({ ...formData, team1_id: e.target.value })}>
                                             <option value="" style={optionStyle}>Select Team</option>
                                             {teams.map(t => <option key={t.id} value={t.id} style={optionStyle}>{t.name}</option>)}
                                         </select>
                                     </div>
                                     <div>
-                                        <label style={labelStyle}>TEAM B</label>
-                                        <select style={inputStyle} value={formData.team_b_id} onChange={e => setFormData({ ...formData, team_b_id: e.target.value })}>
+                                        <label style={labelStyle}>TEAM 2</label>
+                                        <select style={inputStyle} value={formData.team2_id} onChange={e => setFormData({ ...formData, team2_id: e.target.value })}>
                                             <option value="" style={optionStyle}>Select Team</option>
                                             {teams.map(t => <option key={t.id} value={t.id} style={optionStyle}>{t.name}</option>)}
                                         </select>
@@ -819,7 +808,7 @@ function AdminLiveScoreContent() {
                                 {/* TEAM A Squad Selector */}
                                 <div className="glass" style={{ padding: '30px', borderRadius: '25px' }}>
                                     <h3 style={{ marginBottom: '20px', fontWeight: 900, textTransform: 'uppercase' }}>
-                                        {getTeamName(activeMatch?.team_a_id)} ROSTER ({selectedSquadA.length})
+                                        {getTeamName(activeMatch?.team1_id)} ROSTER ({selectedSquadA.length})
                                     </h3>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '500px', overflowY: 'auto', paddingRight: '10px' }}>
                                         {teamAPlayers.length === 0 && <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>No players found for this team.</div>}
@@ -850,7 +839,7 @@ function AdminLiveScoreContent() {
                                 {/* TEAM B Squad Selector */}
                                 <div className="glass" style={{ padding: '30px', borderRadius: '25px' }}>
                                     <h3 style={{ marginBottom: '20px', fontWeight: 900, textTransform: 'uppercase' }}>
-                                        {getTeamName(activeMatch?.team_b_id)} ROSTER ({selectedSquadB.length})
+                                        {getTeamName(activeMatch?.team2_id)} ROSTER ({selectedSquadB.length})
                                     </h3>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '500px', overflowY: 'auto', paddingRight: '10px' }}>
                                         {teamBPlayers.length === 0 && <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>No players found for this team.</div>}
@@ -895,18 +884,18 @@ function AdminLiveScoreContent() {
                                     <label style={labelStyle}>WHO WON THE TOSS?</label>
                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
                                         <button
-                                            onClick={() => setTossData({ ...tossData, toss_winner_id: activeMatch.team_a_id })}
-                                            className={tossData.toss_winner_id === activeMatch.team_a_id ? 'btn-primary' : 'btn-secondary'}
+                                            onClick={() => setTossData({ ...tossData, toss_winner_id: activeMatch.team1_id })}
+                                            className={tossData.toss_winner_id === activeMatch.team1_id ? 'btn-primary' : 'btn-secondary'}
                                             style={{ padding: '20px', fontSize: '1.2rem', fontWeight: 900 }}
                                         >
-                                            {getTeamName(activeMatch.team_a_id)}
+                                            {getTeamName(activeMatch.team1_id)}
                                         </button>
                                         <button
-                                            onClick={() => setTossData({ ...tossData, toss_winner_id: activeMatch.team_b_id })}
-                                            className={tossData.toss_winner_id === activeMatch.team_b_id ? 'btn-primary' : 'btn-secondary'}
+                                            onClick={() => setTossData({ ...tossData, toss_winner_id: activeMatch.team2_id })}
+                                            className={tossData.toss_winner_id === activeMatch.team2_id ? 'btn-primary' : 'btn-secondary'}
                                             style={{ padding: '20px', fontSize: '1.2rem', fontWeight: 900 }}
                                         >
-                                            {getTeamName(activeMatch.team_b_id)}
+                                            {getTeamName(activeMatch.team2_id)}
                                         </button>
                                     </div>
                                 </div>
@@ -954,14 +943,14 @@ function AdminLiveScoreContent() {
                                     className={scoringTab === 'team_a' ? 'btn-primary' : 'btn-secondary'}
                                     style={{ padding: '15px 5px', fontSize: '0.75rem', fontWeight: 900, textTransform: 'uppercase' }}
                                 >
-                                    {getTeamName(activeMatch?.team_a_id)}
+                                    {getTeamName(activeMatch?.team1_id)}
                                 </button>
                                 <button
                                     onClick={() => setScoringTab('team_b')}
                                     className={scoringTab === 'team_b' ? 'btn-primary' : 'btn-secondary'}
                                     style={{ padding: '15px 5px', fontSize: '0.75rem', fontWeight: 900, textTransform: 'uppercase' }}
                                 >
-                                    {getTeamName(activeMatch?.team_b_id)}
+                                    {getTeamName(activeMatch?.team2_id)}
                                 </button>
                                 <button
                                     onClick={() => setScoringTab('live')}
@@ -1025,18 +1014,34 @@ function AdminLiveScoreContent() {
                                         <label style={labelStyle}>STRIKER</label>
                                         <select style={inputStyle} value={strikerId} onChange={e => setStrikerId(e.target.value)}>
                                             <option value="">Select Striker</option>
-                                            {(currentInnings.batting_team_id === activeMatch.team_a_id ? matchPlayersA : matchPlayersB).map(p => (
-                                                <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>
-                                            ))}
+                                            {(() => {
+                                                const battingTeamId = currentInnings.batting_team_id;
+                                                const players = battingTeamId === activeMatch.team1_id ? matchPlayersA : matchPlayersB;
+                                                // Filter out players who are already out in this innings
+                                                const outPlayerIds = matchEvents
+                                                    .filter(e => e.innings_id === currentInnings.id && e.is_wicket)
+                                                    .map(e => e.batsman_id);
+                                                
+                                                return players.filter(p => !outPlayerIds.includes(p.id)).map(p => (
+                                                    <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>
+                                                ));
+                                            })()}
                                         </select>
                                     </div>
                                     <div>
                                         <label style={labelStyle}>CURRENT BOWLER</label>
                                         <select style={inputStyle} value={bowlerId} onChange={e => setBowlerId(e.target.value)}>
                                             <option value="">Select Bowler</option>
-                                            {(currentInnings.bowling_team_id === activeMatch.team_a_id ? matchPlayersA : matchPlayersB).map(p => (
-                                                <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>
-                                            ))}
+                                            {(() => {
+                                                const bowlingTeamId = currentInnings.bowling_team_id;
+                                                const players = bowlingTeamId === activeMatch.team1_id ? matchPlayersA : matchPlayersB;
+                                                
+                                                return players.map(p => (
+                                                    <option key={p.id} value={p.id} disabled={p.id === previousBowlerId}>
+                                                        {p.first_name} {p.last_name} {p.id === previousBowlerId ? '(Cannot bowl back-to-back overs)' : ''}
+                                                    </option>
+                                                ));
+                                            })()}
                                         </select>
                                     </div>
                                 </div>
@@ -1058,7 +1063,7 @@ function AdminLiveScoreContent() {
                                 {/* Extras & Actions */}
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
                                     <button onClick={() => recordBall(0, false, 'wide')} className="btn-secondary" style={{ padding: '20px', fontSize: '1.1rem', fontWeight: 900, borderRadius: '20px', color: '#ffd700', borderColor: '#ffd700' }}>WIDE</button>
-                                    <button onClick={() => recordBall(0, false, 'nb')} className="btn-secondary" style={{ padding: '20px', fontSize: '1.1rem', fontWeight: 900, borderRadius: '20px', color: '#ffd700', borderColor: '#ffd700' }}>NO BALL</button>
+                                    <button onClick={() => recordBall(0, false, 'no_ball')} className="btn-secondary" style={{ padding: '20px', fontSize: '1.1rem', fontWeight: 900, borderRadius: '20px', color: '#ffd700', borderColor: '#ffd700' }}>NO BALL</button>
                                 </div>
 
                                 <button 
@@ -1098,7 +1103,8 @@ function AdminLiveScoreContent() {
                                                     });
                                                 }
                                             } else {
-                                                alert('Over completed! Please select next bowler.');
+                                                alert('Over completed! Please select a NEW bowler.');
+                                                setPreviousBowlerId(bowlerId);
                                                 setBowlerId('');
                                             }
                                         }} 
@@ -1112,12 +1118,7 @@ function AdminLiveScoreContent() {
                             )}
 
                             {(scoringTab === 'team_a' || scoringTab === 'team_b') && activeMatch && (
-                                <MatchScorecard 
-                                    teamId={scoringTab === 'team_a' ? activeMatch.team_a_id : activeMatch.team_b_id}
-                                    teamName={getTeamName(scoringTab === 'team_a' ? activeMatch.team_a_id : activeMatch.team_b_id)}
-                                    events={matchEvents}
-                                    match={activeMatch}
-                                />
+                                <MatchScorecard matchId={activeMatch.id} />
                             )}
                         </motion.div>
                     )}
@@ -1130,7 +1131,7 @@ function AdminLiveScoreContent() {
                                 <div style={{ marginBottom: '20px' }}>
                                     <label style={labelStyle}>DISMISSED BATSMAN</label>
                                     <div style={inputStyle}>
-                                        {getTeamName(currentInnings.batting_team_id === activeMatch.team_a_id ? activeMatch.team_a_id : activeMatch.team_b_id)}: { 
+                                        {getTeamName(currentInnings.batting_team_id === activeMatch.team1_id ? activeMatch.team1_id : activeMatch.team2_id)}: { 
                                             (matchPlayersA.find(p => p.id === strikerId) || matchPlayersB.find(p => p.id === strikerId))?.first_name 
                                         } { 
                                             (matchPlayersA.find(p => p.id === strikerId) || matchPlayersB.find(p => p.id === strikerId))?.last_name 

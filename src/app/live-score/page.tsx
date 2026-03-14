@@ -27,7 +27,7 @@ export default function LiveScorePage() {
     const fetchMatches = async () => {
         const { data, error } = await supabase
             .from('matches')
-            .select('*')
+            .select('*, team1:teams!team1_id(name), team2:teams!team2_id(name), scores:team_scores(team_id, runs, wickets, overs)')
             .order('created_at', { ascending: false });
 
         if (data) setMatches(data);
@@ -69,84 +69,68 @@ export default function LiveScorePage() {
                                 <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '10px' }}>Stay tuned for upcoming games!</p>
                             </div>
                         ) : (
-                            matches.map((match) => (
-                                <motion.div
-                                    initial={{ opacity: 0, y: 20 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    key={match.id}
-                                    className="glass"
-                                    style={{
-                                        padding: 'clamp(20px, 5vw, 40px)',
-                                        borderRadius: '32px',
-                                        border: match.match_status === 'live' ? '2px solid var(--primary)' : '1px solid var(--border)',
-                                        background: 'linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)',
-                                        position: 'relative',
-                                        overflow: 'hidden'
-                                    }}
-                                >
-                                    {match.match_status === 'live' && (
-                                        <div style={{ position: 'absolute', top: '20px', right: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                            <div style={{ width: '8px', height: '8px', background: '#00ff80', borderRadius: '50%' }} className="pulse"></div>
-                                            <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#00ff80', letterSpacing: '1px' }}>LIVE</span>
-                                        </div>
-                                    )}
-
-                                    {/* Match Header */}
-                                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '20px', marginBottom: '30px', flexWrap: 'wrap' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 700 }}>
-                                            <MapPin size={14} color="var(--primary)" /> {match.venue.toUpperCase()}
-                                        </div>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 700 }}>
-                                            <Zap size={14} color="var(--primary)" /> {match.toss_winner} WON TOSS & {match.toss_decision.toUpperCase()}
-                                        </div>
-                                    </div>
-
-                                    {/* Teams & Scores */}
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 1fr', alignItems: 'center', gap: '20px', textAlign: 'center' }}>
-                                        {/* Team 1 */}
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                                            <div style={{ fontSize: 'clamp(1rem, 4vw, 1.8rem)', fontWeight: 900, letterSpacing: '1px' }}>{match.team1_name}</div>
-                                            <div style={{ fontSize: 'clamp(1.5rem, 6vw, 2.5rem)', fontWeight: 950, color: match.batting_team === match.team1_name ? '#fff' : 'var(--text-muted)' }}>
-                                                {match.team1_score}<span style={{ color: 'var(--primary)', opacity: 0.8 }}>/{match.team1_wickets}</span>
+                            matches.map((match) => {
+                                const score1 = match.scores?.find((s: any) => s.team_id === match.team1_id);
+                                const score2 = match.scores?.find((s: any) => s.team_id === match.team2_id);
+                                
+                                return (
+                                    <motion.div
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        key={match.id}
+                                        className="glass"
+                                        style={{
+                                            padding: 'clamp(20px, 5vw, 40px)',
+                                            borderRadius: '32px',
+                                            border: match.status === 'live' ? '2px solid var(--primary)' : '1px solid var(--border)',
+                                            background: 'linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)',
+                                            position: 'relative',
+                                            overflow: 'hidden'
+                                        }}
+                                    >
+                                        {match.status === 'live' && (
+                                            <div style={{ position: 'absolute', top: '20px', right: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <div style={{ width: '8px', height: '8px', background: '#00ff80', borderRadius: '50%' }} className="pulse"></div>
+                                                <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#00ff80', letterSpacing: '1px' }}>LIVE</span>
                                             </div>
-                                            <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 700 }}>{match.team1_overs} Overs</div>
-                                        </div>
+                                        )}
 
-                                        {/* VS */}
-                                        <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--primary)', opacity: 0.5 }}>VS</div>
-
-                                        {/* Team 2 */}
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                                            <div style={{ fontSize: 'clamp(1rem, 4vw, 1.8rem)', fontWeight: 900, letterSpacing: '1px' }}>{match.team2_name}</div>
-                                            <div style={{ fontSize: 'clamp(1.5rem, 6vw, 2.5rem)', fontWeight: 950, color: match.batting_team === match.team2_name ? '#fff' : 'var(--text-muted)' }}>
-                                                {match.team2_score}<span style={{ color: 'var(--primary)', opacity: 0.8 }}>/{match.team2_wickets}</span>
+                                        {/* Teams & Scores */}
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 1fr', alignItems: 'center', gap: '20px', textAlign: 'center', marginTop: '20px' }}>
+                                            {/* Team 1 */}
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                                                <div style={{ fontSize: 'clamp(1rem, 4vw, 1.8rem)', fontWeight: 900, letterSpacing: '1px' }}>{match.team1?.name}</div>
+                                                <div style={{ fontSize: 'clamp(1.5rem, 6vw, 2.5rem)', fontWeight: 950 }}>
+                                                    {score1?.runs || 0}<span style={{ color: 'var(--primary)', opacity: 0.8 }}>/{score1?.wickets || 0}</span>
+                                                </div>
+                                                <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 700 }}>{score1?.overs || 0} Overs</div>
                                             </div>
-                                            <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 700 }}>{match.team2_overs} Overs</div>
-                                        </div>
-                                    </div>
 
-                                    {/* Match Situation */}
-                                    <div style={{ marginTop: '30px', padding: '15px', borderRadius: '15px', background: 'rgba(255, 215, 0, 0.05)', textAlign: 'center', border: '1px solid rgba(255, 215, 0, 0.1)' }}>
-                                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--primary)', letterSpacing: '0.5px' }}>
-                                            {match.match_status === 'live' ? (
-                                                `${match.batting_team} is currently batting`
-                                            ) : (
-                                                `Match Finished`
-                                            )}
-                                        </div>
-                                    </div>
+                                            {/* VS */}
+                                            <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--primary)', opacity: 0.5 }}>VS</div>
 
-                                    <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
-                                        <button 
-                                            onClick={() => router.push(`/match/${match.id}`)}
-                                            className="btn-primary" 
-                                            style={{ padding: '12px 40px', fontSize: '0.9rem', fontWeight: 900, borderRadius: '15px', display: 'flex', alignItems: 'center', gap: '10px' }}
-                                        >
-                                            <Activity size={18} /> CONTINUE
-                                        </button>
-                                    </div>
-                                </motion.div>
-                            ))
+                                            {/* Team 2 */}
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                                                <div style={{ fontSize: 'clamp(1rem, 4vw, 1.8rem)', fontWeight: 900, letterSpacing: '1px' }}>{match.team2?.name}</div>
+                                                <div style={{ fontSize: 'clamp(1.5rem, 6vw, 2.5rem)', fontWeight: 950 }}>
+                                                    {score2?.runs || 0}<span style={{ color: 'var(--primary)', opacity: 0.8 }}>/{score2?.wickets || 0}</span>
+                                                </div>
+                                                <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 700 }}>{score2?.overs || 0} Overs</div>
+                                            </div>
+                                        </div>
+
+                                        <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+                                            <button 
+                                                onClick={() => router.push(`/match/${match.id}`)}
+                                                className="btn-primary" 
+                                                style={{ padding: '12px 40px', fontSize: '0.9rem', fontWeight: 900, borderRadius: '15px', display: 'flex', alignItems: 'center', gap: '10px' }}
+                                            >
+                                                <Activity size={18} /> {match.status === 'live' ? 'WATCH LIVE' : 'VIEW SCORECARD'}
+                                            </button>
+                                        </div>
+                                    </motion.div>
+                                );
+                            })
                         )}
                     </div>
                 </div>

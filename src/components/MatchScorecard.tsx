@@ -1,148 +1,180 @@
 'use client';
 
-import { Swords, Target } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
+import { Swords, Target, Activity, Zap } from 'lucide-react';
 
-export default function MatchScorecard({ teamId, teamName, events }: any) {
-    if (!events || events.length === 0) {
-        return (
-            <div className="glass" style={{ padding: '60px', textAlign: 'center', borderRadius: '35px', maxWidth: '800px', margin: '0 auto' }}>
-                <p style={{ color: 'var(--text-muted)' }}>No scoring events recorded for this team yet.</p>
-            </div>
-        );
-    }
+export default function MatchScorecard({ matchId }: { matchId: string }) {
+    const [teamScores, setTeamScores] = useState<any[]>([]);
+    const [playerStats, setPlayerStats] = useState<any[]>([]);
+    const [matchEvents, setMatchEvents] = useState<any[]>([]);
+    const [activeTeamTab, setActiveTeamTab] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true);
 
-    // Aggregates
-    const battingStats: any = {};
-    const bowlingStats: any = {};
-    let totalRuns = 0;
-    let totalWickets = 0;
-    let totalBalls = 0;
-    let extras = 0;
+    useEffect(() => {
+        if (!matchId) return;
 
-    events.forEach((e: any) => {
-        // Batting for requested team
-        if (e.striker?.team_id === teamId || e.striker?.sold_team === teamName) {
-            if (!battingStats[e.striker_id]) {
-                battingStats[e.striker_id] = { 
-                    name: e.striker ? `${e.striker.first_name} ${e.striker.last_name}` : 'Unknown Player', 
-                    runs: 0, 
-                    balls: 0, 
-                    fours: 0, 
-                    sixes: 0 
-                };
+        const fetchData = async () => {
+            const [scoresRes, statsRes, eventsRes] = await Promise.all([
+                supabase.from('team_scores').select('*, teams(name)').eq('match_id', matchId),
+                supabase.from('player_match_stats').select('*, players(*)').eq('match_id', matchId),
+                supabase.from('match_events').select('*, batsman:players!batsman_id(*), bowler:players!bowler_id(*)').eq('match_id', matchId).order('created_at', { ascending: false }).limit(10)
+            ]);
+
+            if (scoresRes.data) {
+                setTeamScores(scoresRes.data);
+                if (scoresRes.data.length > 0 && !activeTeamTab) {
+                    setActiveTeamTab(scoresRes.data[0].team_id);
+                }
             }
-            battingStats[e.striker_id].runs += (e.runs_off_bat || 0);
-            if (e.extra_type !== 'wide') battingStats[e.striker_id].balls += 1;
-            if (e.runs_off_bat === 4) battingStats[e.striker_id].fours += 1;
-            if (e.runs_off_bat === 6) battingStats[e.striker_id].sixes += 1;
-            
-            totalRuns += (e.runs_off_bat || 0) + (e.extras || 0);
-            extras += (e.extras || 0);
-            if (e.extra_type !== 'wide' && e.extra_type !== 'nb') totalBalls += 1;
-            if (e.is_wicket) totalWickets += 1;
-        }
+            if (statsRes.data) setPlayerStats(statsRes.data);
+            if (eventsRes.data) setMatchEvents(eventsRes.data);
+            setLoading(false);
+        };
 
-        // Bowling for requested team
-        if (e.bowler?.team_id === teamId || e.bowler?.sold_team === teamName) {
-            if (!bowlingStats[e.bowler_id]) {
-                bowlingStats[e.bowler_id] = { 
-                    name: e.bowler ? `${e.bowler.first_name} ${e.bowler.last_name}` : 'Unknown Bowler', 
-                    overs: 0, 
-                    runs: 0, 
-                    wickets: 0, 
-                    balls: 0 
-                };
-            }
-            if (e.extra_type !== 'wide' && e.extra_type !== 'nb') bowlingStats[e.bowler_id].balls += 1;
-            bowlingStats[e.bowler_id].runs += (e.runs_off_bat || 0) + (e.extras || 0);
-            if (e.is_wicket) bowlingStats[e.bowler_id].wickets += 1;
-        }
-    });
+        fetchData();
 
-    const formatOvers = (balls: number) => {
-        return `${Math.floor(balls / 6)}.${balls % 6}`;
-    };
+        // REAL-TIME SUBSCRIPTIONS
+        const channel = supabase.channel(`scorecard_${matchId}`)
+            .on('postgres_changes', { event: '*', table: 'team_scores', schema: 'public', filter: `match_id=eq.${matchId}` }, (payload: any) => {
+                setTeamScores(prev => {
+                    const index = prev.findIndex(s => s.id === (payload.new as any).id);
+                    if (index > -1) {
+                        const updated = [...prev];
+                        updated[index] = { ...updated[index], ...payload.new };
+                        return updated;
+                    }
+                    return [...prev, payload.new];
+                });
+            })
+            .on('postgres_changes', { event: '*', table: 'player_match_stats', schema: 'public', filter: `match_id=eq.${matchId}` }, (payload: any) => {
+                fetchData(); // Simplest way to keep players & their relations synced
+            })
+            .on('postgres_changes', { event: 'INSERT', table: 'match_events', schema: 'public', filter: `match_id=eq.${matchId}` }, (payload: any) => {
+                fetchData();
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [matchId]);
+
+    if (loading) return <div className="p-10 text-center animate-pulse">Loading Live Scorecard...</div>;
+
+    const currentTeamScore = teamScores.find(ts => ts.team_id === activeTeamTab);
+    const battingPlayers = playerStats.filter(ps => ps.players?.team_id === activeTeamTab && ps.balls > 0);
+    const bowlingPlayers = playerStats.filter(ps => ps.players?.team_id !== activeTeamTab && ps.runs_given > 0);
 
     return (
-        <div className="glass scorecard-container" style={{ padding: 'clamp(20px, 5vw, 40px)', borderRadius: '35px', maxWidth: '800px', margin: '0 auto' }}>
-            <div style={{ textAlign: 'center', marginBottom: '30px' }}>
-                <h2 style={{ fontSize: 'clamp(1.5rem, 6vw, 2.2rem)', fontWeight: 950, color: 'var(--primary)' }}>{teamName.toUpperCase()}</h2>
-                <div style={{ display: 'flex', justifyContent: 'center', gap: 'clamp(20px, 8vw, 60px)', marginTop: '10px' }}>
-                    <div>
-                        <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--text-muted)', letterSpacing: '1px' }}>SCORE</div>
-                        <div style={{ fontSize: '1.8rem', fontWeight: 950 }}>{totalRuns} - {totalWickets}</div>
-                    </div>
-                    <div>
-                        <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--text-muted)', letterSpacing: '1px' }}>OVERS</div>
-                        <div style={{ fontSize: '1.8rem', fontWeight: 950 }}>{formatOvers(totalBalls)}</div>
-                    </div>
-                </div>
-                {extras > 0 && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '10px', fontWeight: 700 }}>Extras: {extras}</div>}
+        <div className="scorecard-wrapper" style={{ color: '#fff' }}>
+            {/* Team Tabs */}
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+                {teamScores.map(ts => (
+                    <button
+                        key={ts.team_id}
+                        onClick={() => setActiveTeamTab(ts.team_id)}
+                        className={`tab-btn ${activeTeamTab === ts.team_id ? 'active' : ''}`}
+                    >
+                        {ts.teams?.name?.toUpperCase()}
+                    </button>
+                ))}
             </div>
 
-            <div style={{ marginBottom: '40px' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 950, marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '10px' }}>
-                    <Swords size={20} color="var(--primary)" /> BATTING SCORECARD
-                </h3>
-                <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                        <thead>
-                            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                                <th style={{ padding: '12px 10px', fontSize: '0.75rem', fontWeight: 800 }}>PLAYER</th>
-                                <th style={{ padding: '12px 10px', fontSize: '0.75rem', fontWeight: 800, textAlign: 'right' }}>R</th>
-                                <th style={{ padding: '12px 10px', fontSize: '0.75rem', fontWeight: 800, textAlign: 'right' }}>B</th>
-                                <th style={{ padding: '12px 10px', fontSize: '0.75rem', fontWeight: 800, textAlign: 'right' }}>4s</th>
-                                <th style={{ padding: '12px 10px', fontSize: '0.75rem', fontWeight: 800, textAlign: 'right' }}>6s</th>
+            {/* Main Score Display */}
+            {currentTeamScore && (
+                <div className="glass-card" style={{ padding: '30px', borderRadius: '25px', marginBottom: '30px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.1)' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '5px 12px', background: 'rgba(255,75,75,0.1)', borderRadius: '20px', border: '1px solid rgba(255,75,75,0.3)', color: '#ff4b4b', fontWeight: 900, fontSize: '0.75rem', marginBottom: '15px' }}>
+                        <div className="pulse-dot" /> LIVE MATCH
+                    </div>
+                    <h2 style={{ fontSize: '2.5rem', fontWeight: 950, marginBottom: '5px' }}>{currentTeamScore.teams?.name}</h2>
+                    <div style={{ fontSize: '3.5rem', fontWeight: 950, color: 'var(--primary)' }}>
+                        {currentTeamScore.runs}/{currentTeamScore.wickets}
+                        <span style={{ fontSize: '1.5rem', color: '#888', marginLeft: '15px' }}>({currentTeamScore.overs} ov)</span>
+                    </div>
+                </div>
+            )}
+
+            {/* Batting Table */}
+            <div className="glass-card" style={{ padding: '25px', borderRadius: '25px', marginBottom: '25px' }}>
+                <h3 className="section-title"><Swords size={20} /> BATTING</h3>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', textAlign: 'left', color: '#888', fontSize: '0.8rem' }}>
+                            <th style={{ padding: '10px' }}>Player</th>
+                            <th style={{ padding: '10px', textAlign: 'right' }}>R</th>
+                            <th style={{ padding: '10px', textAlign: 'right' }}>B</th>
+                            <th style={{ padding: '10px', textAlign: 'right' }}>4s</th>
+                            <th style={{ padding: '10px', textAlign: 'right' }}>6s</th>
+                            <th style={{ padding: '10px', textAlign: 'right' }}>SR</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {battingPlayers.map(ps => (
+                            <tr key={ps.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                <td style={{ padding: '15px 10px', fontWeight: 700 }}>{ps.players?.first_name} {ps.players?.last_name}</td>
+                                <td style={{ padding: '15px 10px', textAlign: 'right', fontWeight: 900, color: 'var(--primary)' }}>{ps.runs}</td>
+                                <td style={{ padding: '15px 10px', textAlign: 'right', color: '#888' }}>{ps.balls}</td>
+                                <td style={{ padding: '15px 10px', textAlign: 'right' }}>{ps.fours}</td>
+                                <td style={{ padding: '15px 10px', textAlign: 'right' }}>{ps.sixes}</td>
+                                <td style={{ padding: '15px 10px', textAlign: 'right', fontWeight: 700 }}>{ps.balls > 0 ? ((ps.runs / ps.balls) * 100).toFixed(1) : '0.0'}</td>
                             </tr>
-                        </thead>
-                        <tbody>
-                            {Object.values(battingStats).length === 0 ? (
-                                <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>No batting data yet.</td></tr>
-                            ) : Object.values(battingStats).map((s: any, i) => (
-                                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                                    <td style={{ padding: '15px 10px', fontWeight: 800, fontSize: '0.95rem' }}>{s.name}</td>
-                                    <td style={{ padding: '15px 10px', fontWeight: 950, textAlign: 'right', color: 'var(--primary)' }}>{s.runs}</td>
-                                    <td style={{ padding: '15px 10px', color: 'var(--text-muted)', textAlign: 'right', fontWeight: 700 }}>{s.balls}</td>
-                                    <td style={{ padding: '15px 10px', textAlign: 'right' }}>{s.fours}</td>
-                                    <td style={{ padding: '15px 10px', textAlign: 'right' }}>{s.sixes}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+
+            {/* Bowling Table */}
+            <div className="glass-card" style={{ padding: '25px', borderRadius: '25px', marginBottom: '25px' }}>
+                <h3 className="section-title"><Target size={20} /> BOWLING</h3>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', textAlign: 'left', color: '#888', fontSize: '0.8rem' }}>
+                            <th style={{ padding: '10px' }}>Bowler</th>
+                            <th style={{ padding: '10px', textAlign: 'right' }}>O</th>
+                            <th style={{ padding: '10px', textAlign: 'right' }}>R</th>
+                            <th style={{ padding: '10px', textAlign: 'right' }}>W</th>
+                            <th style={{ padding: '10px', textAlign: 'right' }}>Econ</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {bowlingPlayers.map(ps => (
+                            <tr key={ps.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                <td style={{ padding: '15px 10px', fontWeight: 700 }}>{ps.players?.first_name} {ps.players?.last_name}</td>
+                                <td style={{ padding: '15px 10px', textAlign: 'right', fontWeight: 900 }}>{ps.overs}</td>
+                                <td style={{ padding: '15px 10px', textAlign: 'right', color: '#ff4b4b' }}>{ps.runs_given}</td>
+                                <td style={{ padding: '15px 10px', textAlign: 'right', fontWeight: 900, color: '#00ff80' }}>{ps.wickets}</td>
+                                <td style={{ padding: '15px 10px', textAlign: 'right', color: '#888' }}>{ps.overs > 0 ? (ps.runs_given / parseFloat(ps.overs.toString())).toFixed(2) : '0.00'}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+
+            {/* Recent Match Events Feed */}
+            <div className="glass-card" style={{ padding: '25px', borderRadius: '25px' }}>
+                <h3 className="section-title"><Zap size={20} /> RECENT EVENTS</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {matchEvents.map((e, i) => (
+                        <div key={e.id} className="event-row">
+                            <span className="event-over">Over {e.over_number}.{e.ball_number}</span>
+                            <span className="event-desc">
+                                <strong>{e.batsman?.first_name}</strong> {e.event_type === 'run' ? `scored ${e.runs} run${e.runs !== 1 ? 's' : ''}` : e.event_type === 'four' ? 'hit FOUR!' : e.event_type === 'six' ? 'hit SIX!!' : e.event_type === 'wicket' ? 'is OUT!' : `received ${e.runs} extra (${e.event_type})`}
+                            </span>
+                        </div>
+                    ))}
                 </div>
             </div>
 
-            <div>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 950, marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '10px' }}>
-                    <Target size={20} color="#00ff80" /> BOWLING SCORECARD
-                </h3>
-                <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                        <thead>
-                            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                                <th style={{ padding: '12px 10px', fontSize: '0.75rem', fontWeight: 800 }}>BOWLER</th>
-                                <th style={{ padding: '12px 10px', fontSize: '0.75rem', fontWeight: 800, textAlign: 'right' }}>O</th>
-                                <th style={{ padding: '12px 10px', fontSize: '0.75rem', fontWeight: 800, textAlign: 'right' }}>R</th>
-                                <th style={{ padding: '12px 10px', fontSize: '0.75rem', fontWeight: 800, textAlign: 'right' }}>W</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                             {Object.values(bowlingStats).length === 0 ? (
-                                <tr><td colSpan={4} style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>No bowling data yet.</td></tr>
-                            ) : Object.values(bowlingStats).map((s: any, i) => (
-                                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                                    <td style={{ padding: '15px 10px', fontWeight: 800, fontSize: '0.95rem' }}>{s.name}</td>
-                                    <td style={{ padding: '15px 10px', fontWeight: 900, textAlign: 'right' }}>{formatOvers(s.balls)}</td>
-                                    <td style={{ padding: '15px 10px', color: '#ff4b4b', textAlign: 'right', fontWeight: 800 }}>{s.runs}</td>
-                                    <td style={{ padding: '15px 10px', color: '#00ff80', textAlign: 'right', fontWeight: 950 }}>{s.wickets}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
             <style jsx>{`
-                .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(20px); border: 1px solid var(--border); }
+                .tab-btn { flex: 1; padding: 15px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 15px; color: #fff; font-weight: 800; cursor: pointer; transition: 0.3s; }
+                .tab-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
+                .glass-card { background: rgba(255,255,255,0.03); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.05); }
+                .section-title { display: flex; alignItems: center; gap: 10px; font-weight: 900; margin-bottom: 20px; color: #fff; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; }
+                .event-row { display: flex; gap: 15px; padding: 12px; background: rgba(255,255,255,0.02); border-radius: 12px; font-size: 0.9rem; }
+                .event-over { color: var(--primary); font-weight: 900; min-width: 80px; }
+                .pulse-dot { width: 8px; height: 8px; borderRadius: 50%; background: #ff4b4b; animation: pulse 1.5s infinite; }
+                @keyframes pulse { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.2); } 100% { opacity: 1; transform: scale(1); } }
             `}</style>
         </div>
     );

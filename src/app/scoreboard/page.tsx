@@ -16,13 +16,20 @@ export default function ScoreboardPage() {
 
     useEffect(() => {
         fetchScore();
-        const interval = setInterval(fetchScore, 3000);
-        return () => clearInterval(interval);
+        
+        // Subscription for Realtime Updates
+        const channel = supabase.channel('scoreboard_sync')
+            .on('postgres_changes', { event: '*', table: 'innings', schema: 'public' }, () => fetchScore())
+            .on('postgres_changes', { event: '*', table: 'matches', schema: 'public' }, () => fetchScore())
+            .on('postgres_changes', { event: '*', table: 'player_match_stats', schema: 'public' }, () => fetchScore())
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
     }, []);
 
     const fetchScore = async () => {
         const { data: liveMatch } = await supabase.from('matches')
-            .select('*, team_a:teams!team_a_id(*), team_b:teams!team_b_id(*)')
+            .select('*, team1:teams!team1_id(*), team2:teams!team2_id(*)')
             .eq('status', 'live')
             .order('created_at', { ascending: false })
             .maybeSingle();
@@ -30,7 +37,7 @@ export default function ScoreboardPage() {
         let activeMatch = liveMatch;
         if (!activeMatch) {
             const { data: lastMatch } = await supabase.from('matches')
-                .select('*, team_a:teams!team_a_id(*), team_b:teams!team_b_id(*)')
+                .select('*, team1:teams!team1_id(*), team2:teams!team2_id(*)')
                 .eq('status', 'completed')
                 .order('created_at', { ascending: false })
                 .limit(1)
@@ -43,7 +50,7 @@ export default function ScoreboardPage() {
             const [{ data: innData }, { data: statsData }, { data: upMatch }] = await Promise.all([
                 supabase.from('innings').select('*').eq('match_id', activeMatch.id).order('innings_number', { ascending: true }),
                 supabase.from('player_match_stats').select('*, players(*)').eq('match_id', activeMatch.id),
-                supabase.from('matches').select('*, team_a:teams!team_a_id(*), team_b:teams!team_b_id(*)').eq('status', 'scheduled').order('created_at', { ascending: true }).limit(1).maybeSingle()
+                supabase.from('matches').select('*, team1:teams!team1_id(*), team2:teams!team2_id(*)').eq('status', 'upcoming').order('created_at', { ascending: true }).limit(1).maybeSingle()
             ]);
 
             if (innData) setInnings(innData);
@@ -68,8 +75,8 @@ export default function ScoreboardPage() {
     );
 
     const currentInn = innings.find(inn => !inn.is_completed) || innings[innings.length - 1];
-    const battingTeam = currentInn?.batting_team_id === match.team_a_id ? match.team_a : match.team_b;
-    const bowlingTeam = currentInn?.batting_team_id === match.team_a_id ? match.team_b : match.team_a;
+    const battingTeam = currentInn?.batting_team_id === match.team1_id ? match.team1 : match.team2;
+    const bowlingTeam = currentInn?.batting_team_id === match.team1_id ? match.team2 : match.team1;
 
     return (
         <main style={{ minHeight: '100vh', background: '#000', color: '#fff', padding: '20px' }}>
@@ -79,11 +86,11 @@ export default function ScoreboardPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', background: 'rgba(255,255,255,0.03)', padding: '15px 30px', borderRadius: '50px', border: '1px solid var(--border)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                         <div style={{ width: '10px', height: '100%', aspectRatio: '1', borderRadius: '50%', background: match.status === 'live' ? '#00ff80' : '#ff4b4b', boxShadow: match.status === 'live' ? '0 0 10px #00ff80' : 'none' }} />
-                        <span style={{ fontWeight: 900, fontSize: '0.9rem', letterSpacing: '1px' }}>{match.status.toUpperCase()}</span>
+                        <span style={{ fontWeight: 900, fontSize: '0.9rem', letterSpacing: '1px' }}>{(match.status || 'Live').toUpperCase()}</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-muted)' }}>
                         <Timer size={16} />
-                        <span style={{ fontSize: '0.8rem', fontWeight: 800 }}>LIVE SYNC EVERY 3S</span>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 800 }}>LIVE REALTIME SYNC</span>
                     </div>
                 </div>
 
@@ -94,23 +101,21 @@ export default function ScoreboardPage() {
                     </div>
 
                     <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-                        <div style={{ color: 'var(--primary)', fontWeight: 900, letterSpacing: '2px', fontSize: '0.8rem' }}>{match.match_type.toUpperCase()} • {match.venue.toUpperCase()}</div>
+                        <div style={{ color: 'var(--primary)', fontWeight: 900, letterSpacing: '2px', fontSize: '0.8rem' }}>{(match.match_type || 'Match').toUpperCase()} • {(match.venue || 'Venue').toUpperCase()}</div>
                         <h1 style={{ fontSize: '2.5rem', fontWeight: 950, marginTop: '10px' }}>{match.match_name}</h1>
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto minmax(0, 1fr)', alignItems: 'center', gap: '20px md:40px' }}>
                         <div style={{ textAlign: 'center' }}>
-                            <div style={{ fontSize: 'clamp(1.2rem, 4vw, 2rem)', fontWeight: 950, overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.team_a.name}</div>
-                            {match.status === 'live' && innings[0]?.batting_team_id === match.team_a_id && <ScoreDisplay inn={innings[0]} />}
-                            {match.status === 'live' && innings[1]?.batting_team_id === match.team_a_id && <ScoreDisplay inn={innings[1]} />}
+                            <div style={{ fontSize: 'clamp(1.2rem, 4vw, 2rem)', fontWeight: 950, overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.team1?.name}</div>
+                            <ScoreDisplay inn={innings.find(i => i.batting_team_id === match.team1_id)} />
                         </div>
 
                         <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'rgba(255,255,255,0.2)' }}>VS</div>
 
                         <div style={{ textAlign: 'center' }}>
-                            <div style={{ fontSize: 'clamp(1.2rem, 4vw, 2rem)', fontWeight: 950, overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.team_b.name}</div>
-                            {match.status === 'live' && innings[0]?.batting_team_id === match.team_b_id && <ScoreDisplay inn={innings[0]} />}
-                            {match.status === 'live' && innings[1]?.batting_team_id === match.team_b_id && <ScoreDisplay inn={innings[1]} />}
+                            <div style={{ fontSize: 'clamp(1.2rem, 4vw, 2rem)', fontWeight: 950, overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.team2?.name}</div>
+                            <ScoreDisplay inn={innings.find(i => i.batting_team_id === match.team2_id)} />
                         </div>
                     </div>
 
@@ -142,7 +147,7 @@ export default function ScoreboardPage() {
                     {match.status === 'completed' && match.winner_team_id && (
                         <div style={{ marginTop: '40px', padding: '20px', background: 'rgba(0, 255, 128, 0.1)', border: '1px solid #00ff80', borderRadius: '20px', textAlign: 'center' }}>
                             <h2 style={{ color: '#00ff80', fontWeight: 950, fontSize: 'clamp(1rem, 4vw, 1.5rem)' }}>
-                                {match.winner_team_id === match.team_a_id ? match.team_a.name : match.team_b.name} WON THE MATCH
+                                {match.result_message || `${match.winner_team_id === match.team1_id ? match.team1?.name : match.team2?.name} WON THE MATCH`}
                             </h2>
                         </div>
                     )}
@@ -192,7 +197,7 @@ export default function ScoreboardPage() {
                             <h3 style={{ fontWeight: 900 }}>TOP PERFORMERS</h3>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                            {stats.sort((a, b) => b.runs_scored - a.runs_scored).slice(0, 5).map(s => (
+                            {stats.sort((a, b) => b.runs - a.runs).slice(0, 5).map(s => (
                                 <div key={s.player_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px', background: 'rgba(255,255,255,0.03)', borderRadius: '15px' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                                         <div style={{ width: '35px', height: '35px', borderRadius: '50%', background: '#222', overflow: 'hidden' }}>
@@ -203,7 +208,7 @@ export default function ScoreboardPage() {
                                         </div>
                                     </div>
                                     <div style={{ textAlign: 'right' }}>
-                                        <div style={{ fontSize: '1.1rem', fontWeight: 900 }}>{s.runs_scored} <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>({s.balls_faced})</span></div>
+                                        <div style={{ fontSize: '1.1rem', fontWeight: 900 }}>{s.runs} <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>({s.balls})</span></div>
                                     </div>
                                 </div>
                             ))}
@@ -217,7 +222,7 @@ export default function ScoreboardPage() {
                             <h3 style={{ fontWeight: 900 }}>TOP BOWLERS</h3>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                            {stats.sort((a, b) => b.wickets_taken - a.wickets_taken).slice(0, 5).map(s => (
+                            {stats.sort((a, b) => b.wickets - a.wickets).slice(0, 5).map(s => (
                                 <div key={s.player_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px', background: 'rgba(255,255,255,0.03)', borderRadius: '15px' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                                         <div style={{ width: '35px', height: '35px', borderRadius: '50%', background: '#222', overflow: 'hidden' }}>
@@ -228,8 +233,8 @@ export default function ScoreboardPage() {
                                         </div>
                                     </div>
                                     <div style={{ textAlign: 'right' }}>
-                                        <div style={{ fontSize: '1.1rem', fontWeight: 900 }}>{s.wickets_taken} <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Wkts</span></div>
-                                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{(s.overs_bowled || 0).toFixed(1)} Overs</div>
+                                        <div style={{ fontSize: '1.1rem', fontWeight: 900 }}>{s.wickets} <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Wkts</span></div>
+                                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{(s.overs || 0).toFixed(1)} Overs</div>
                                     </div>
                                 </div>
                             ))}
@@ -242,8 +247,8 @@ export default function ScoreboardPage() {
                 {nextMatch && (
                     <div className="glass" style={{ padding: '25px', borderRadius: '30px', marginTop: '30px', border: '1px dashed var(--primary)', textAlign: 'center' }}>
                         <div style={{ fontSize: '0.7rem', color: 'var(--primary)', fontWeight: 900, letterSpacing: '2px', marginBottom: '10px' }}>UPCOMING MATCH</div>
-                        <div style={{ fontSize: '1.3rem', fontWeight: 950 }}>
-                            {nextMatch.team_a?.name} <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: '0 15px' }}>VS</span> {nextMatch.team_b?.name}
+                         <div style={{ fontSize: '1.3rem', fontWeight: 950 }}>
+                            {nextMatch.team1?.name} <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: '0 15px' }}>VS</span> {nextMatch.team2?.name}
                         </div>
                         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '5px' }}>{nextMatch.match_name} • {nextMatch.venue}</div>
                     </div>
@@ -260,10 +265,11 @@ export default function ScoreboardPage() {
 }
 
 function ScoreDisplay({ inn }: { inn: any }) {
+    if (!inn) return null;
     return (
         <div style={{ marginTop: '15px' }}>
             <div style={{ fontSize: '3rem', fontWeight: 950, color: 'var(--primary)' }}>{inn.runs} - {inn.wickets}</div>
-            <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-muted)' }}>{inn.overs.toFixed(1)} OVERS</div>
+            <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-muted)' }}>{(inn.overs || 0).toFixed(1)} OVERS</div>
         </div>
     );
 }

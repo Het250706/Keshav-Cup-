@@ -92,7 +92,7 @@ export default function NotificationSystem() {
                             display: 'flex',
                             alignItems: 'center',
                             gap: '15px',
-                            background: n.type === 'success' ? 'rgba(0, 255, 128, 0.95)' :
+                            background: n.type === 'success' ? 'rgba(255, 50, 50, 0.95)' :
                                 n.type === 'bid' ? 'rgba(255, 215, 0, 0.95)' : 'rgba(0, 150, 255, 0.95)',
                             color: n.type === 'bid' ? '#000' : '#fff',
                             borderRadius: '20px',

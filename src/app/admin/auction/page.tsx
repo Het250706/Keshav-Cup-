@@ -20,6 +20,27 @@ import {
 } from 'lucide-react';
 import { getPurplePushp, MAX_SQUAD_SIZE } from '@/lib/auction-logic';
 
+function TimeSince({ dateString }: { dateString: string }) {
+    const [now, setNow] = useState(new Date());
+    useEffect(() => {
+        const timer = setInterval(() => setNow(new Date()), 1000);
+        return () => clearInterval(timer);
+    }, []);
+
+    const ms = now.getTime() - new Date(dateString).getTime();
+    if (ms < 0) return <span>Just now</span>;
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    
+    let text = '';
+    if (hours > 0) text = `${hours}h ${minutes % 60}m ago`;
+    else if (minutes > 0) text = `${minutes}m ${seconds % 60}s ago`;
+    else text = `${seconds}s ago`;
+
+    return <span style={{ color: 'var(--primary)', fontSize: '0.85rem', marginLeft: '8px' }}>({text})</span>;
+}
+
 export default function AdminAuctionPage() {
     return (
         <RoleGuard allowedRole="admin">
@@ -37,6 +58,21 @@ function AdminAuctionContent() {
     const [showPlayerSelect, setShowPlayerSelect] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [isSoldAnimating, setIsSoldAnimating] = useState(false);
+    const [recentBids, setRecentBids] = useState<any[]>([]);
+
+    const fetchRecentBids = async (playerId: string) => {
+        if (!playerId) {
+            setRecentBids([]);
+            return;
+        }
+        const { data } = await supabase
+            .from('bids')
+            .select('*')
+            .eq('player_id', playerId)
+            .order('created_at', { ascending: false })
+            .limit(5);
+        if (data) setRecentBids(data);
+    };
 
     const fetchData = async () => {
         try {
@@ -47,7 +83,10 @@ function AdminAuctionContent() {
             ]);
 
             if (playersRes.data) setPlayers(playersRes.data);
-            if (stateRes.data) setAuctionState(stateRes.data);
+            if (stateRes.data) {
+                setAuctionState(stateRes.data);
+                fetchRecentBids(stateRes.data.current_player_id);
+            }
             if (teamsRes.data) {
                 // Fetch squad counts for each team
                 const teamsWithSquadCount = await Promise.all(teamsRes.data.map(async (t: any) => {
@@ -72,13 +111,21 @@ function AdminAuctionContent() {
                     setIsSoldAnimating(true);
                     setTimeout(() => setIsSoldAnimating(false), 3000);
                 }
+                if (p.new.current_player_id) {
+                    fetchRecentBids(p.new.current_player_id);
+                }
+            })
+            .on('postgres_changes', { event: 'INSERT', table: 'bids', schema: 'public' }, (payload: any) => {
+                if (payload.new.player_id === auctionState?.current_player_id) {
+                    fetchRecentBids(payload.new.player_id);
+                }
             })
             .on('postgres_changes', { event: '*', table: 'players', schema: 'public' }, () => fetchData())
             .on('postgres_changes', { event: '*', table: 'teams', schema: 'public' }, () => fetchData())
             .subscribe();
 
         return () => { supabase.removeChannel(stateSub); };
-    }, []);
+    }, [auctionState?.current_player_id]);
 
     const handleAction = async (action: string, payload: any = {}) => {
         setActionLoading(true);
@@ -142,7 +189,7 @@ function AdminAuctionContent() {
                         {currentPlayer ? (
                             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="glass" style={{ padding: '40px', borderRadius: '30px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,215,0,0.1)', position: 'relative' }}>
                                 <div style={{ position: 'absolute', top: '30px', right: '30px', zIndex: 10 }}>
-                                    <div style={{ padding: '10px 25px', borderRadius: '50px', background: 'var(--primary)', color: '#000', fontWeight: 900, fontSize: '1.1rem' }}>
+                                    <div style={{ padding: '5px 12px', borderRadius: '50px', background: 'var(--primary)', color: '#000', fontWeight: 900, fontSize: '0.75rem' }}>
                                         {auctionState?.bidding_status || 'PENDING'}
                                     </div>
                                 </div>
@@ -187,7 +234,91 @@ function AdminAuctionContent() {
                         )}
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '25px', position: 'sticky', top: '20px', alignSelf: 'start' }}>
+                        {/* LIVE BID STATUS PANEL */}
+                        <div className="glass" style={{ padding: '25px', borderRadius: '25px', border: '2px solid var(--primary)', background: 'rgba(255, 215, 0, 0.03)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                                <h3 style={{ fontSize: '1.2rem', fontWeight: 950, display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--primary)' }}>
+                                    <Zap size={20} fill="var(--primary)" /> LIVE BID STATUS
+                                </h3>
+                                <div style={{ 
+                                    padding: '5px 12px', 
+                                    borderRadius: '50px', 
+                                    background: auctionState?.status === 'BIDDING' ? '#00ff80' : auctionState?.status === 'SOLD' ? '#ff4b4b' : '#666', 
+                                    color: '#000', 
+                                    fontSize: '0.7rem', 
+                                    fontWeight: 900,
+                                    textTransform: 'uppercase'
+                                }}>
+                                    {auctionState?.status === 'BIDDING' ? 'Live Auction' : auctionState?.status === 'SOLD' ? 'SOLD' : 'Paused'}
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                                <div style={{ background: 'rgba(255,255,255,0.03)', padding: '15px', borderRadius: '15px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 800, marginBottom: '5px' }}>PLAYER</div>
+                                    <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>
+                                        {currentPlayer ? `${currentPlayer.first_name} ${currentPlayer.last_name}` : 'No Active Player'}
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '15px', borderRadius: '15px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 800, marginBottom: '5px' }}>HIGHEST BID</div>
+                                        <div style={{ fontSize: '1.4rem', fontWeight: 950, color: 'var(--primary)' }}>
+                                            {auctionState?.current_highest_bid || 0} P
+                                        </div>
+                                    </div>
+                                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '15px', borderRadius: '15px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 800, marginBottom: '5px' }}>LAST BID TIME</div>
+                                        <div style={{ fontSize: '1rem', fontWeight: 800 }}>
+                                            {recentBids[0] ? (
+                                                <>
+                                                    {new Date(recentBids[0].created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                                    <TimeSince dateString={recentBids[0].created_at} />
+                                                </>
+                                            ) : '--:--'}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div style={{ background: 'rgba(255,255,255,0.03)', padding: '15px', borderRadius: '15px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 800, marginBottom: '5px' }}>CURRENT LEADER</div>
+                                    <div style={{ fontSize: '1.2rem', fontWeight: 900, color: winningTeam ? '#00ff80' : '#fff' }}>
+                                        {winningTeam?.name || 'Waiting for Bids...'}
+                                    </div>
+                                </div>
+
+                                {/* RECENT BIDS */}
+                                <div style={{ marginTop: '10px' }}>
+                                    <div style={{ fontSize: '0.85rem', fontWeight: 900, marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <History size={16} /> RECENT BIDS
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        {recentBids.length > 0 ? recentBids.map((bid, i) => {
+                                            const team = teams.find(t => t.id === bid.team_id);
+                                            return (
+                                                <div key={i} style={{ 
+                                                    display: 'flex', 
+                                                    justifyContent: 'space-between', 
+                                                    alignItems: 'center', 
+                                                    padding: '10px 15px', 
+                                                    background: i === 0 ? 'rgba(255, 215, 0, 0.1)' : 'rgba(255,255,255,0.02)', 
+                                                    borderRadius: '10px',
+                                                    border: i === 0 ? '1px solid rgba(255, 215, 0, 0.2)' : '1px solid transparent'
+                                                }}>
+                                                    <span style={{ fontWeight: 800, fontSize: '0.9rem' }}>{team?.name || 'Unknown'}</span>
+                                                    <span style={{ fontWeight: 900, color: 'var(--primary)', fontSize: '1rem' }}>{bid.amount} P</span>
+                                                </div>
+                                            );
+                                        }) : (
+                                            <div style={{ textAlign: 'center', padding: '10px', color: 'var(--text-muted)', fontSize: '0.8rem' }}>No bids yet</div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div className="glass" style={{ padding: '25px', borderRadius: '25px' }}>
                             <h3 style={{ fontSize: '1.1rem', fontWeight: 900, marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
                                 <Award size={20} color="var(--primary)" /> LEADERBOARD (9 SQUAD LIMIT)
