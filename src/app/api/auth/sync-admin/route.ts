@@ -21,7 +21,7 @@ export async function POST(req: Request) {
 
         for (const email of ALLOWED_ADMINS) {
             console.log(`Processing admin: ${email}`);
-            
+
             // 1. Try to create user
             const { data, error } = await supabaseAdmin.auth.admin.createUser({
                 email,
@@ -33,18 +33,18 @@ export async function POST(req: Request) {
             if (error) {
                 if (error.message.toLowerCase().includes('already registered') || error.status === 422) {
                     console.log(`User ${email} exists, updating password...`);
-                    
+
                     // 2. If exists, find ID and update password
                     const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
                     const existingUser = usersData?.users.find((u: any) => u.email?.toLowerCase() === email.toLowerCase());
-                    
+
                     if (existingUser) {
                         const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
                             password,
                             email_confirm: true,
                             user_metadata: { role: 'ADMIN' }
                         });
-                        
+
                         if (updateError) {
                             results.push({ email, status: 'error', message: updateError.message });
                             continue;
@@ -71,8 +71,8 @@ export async function POST(req: Request) {
             }
         }
 
-        return NextResponse.json({ 
-            success: true, 
+        return NextResponse.json({
+            success: true,
             message: `Processed ${results.length} admin accounts.`,
             details: results
         });
