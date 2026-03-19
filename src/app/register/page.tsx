@@ -24,17 +24,17 @@ export default function PublicRegistrationPage() {
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
-    
+
     const [useCamera, setUseCamera] = useState(false);
     const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
     const [stream, setStream] = useState<MediaStream | null>(null);
-    
+
     const videoRef = useRef<HTMLVideoElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const karyakars = [
-        'Dev Kachhiya', 'Meet Mochi', 'Subham Kachhiya', 
-        'Taksh Kachhiya (Patel Nagar)', 'Darpan Patel', 
+        'Dev Kachhiya', 'Meet Mochi', 'Subham Kachhiya',
+        'Taksh Kachhiya (Patel Nagar)', 'Darpan Patel',
         'Shiv Patel', 'Vatsal Patel'
     ];
 
@@ -50,7 +50,7 @@ export default function PublicRegistrationPage() {
         if (!photoFile) newErrors.photo = 'Photo is required';
         if (!formData.prev_participation) newErrors.prev_participation = 'આ ક્ષેત્ર આવશ્યક છે';
         if (!formData.skill) newErrors.skill = 'Skill is required';
-        
+
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
@@ -64,14 +64,17 @@ export default function PublicRegistrationPage() {
     };
 
     const startCamera = async (facing: 'environment' | 'user' = 'environment') => {
+        // Pehla juna stream band karo
         if (stream) {
             stream.getTracks().forEach(track => track.stop());
+            setStream(null);
         }
-        
+
         try {
+            // { ideal: facing } — back camera properly open karse
             const constraints = {
-                video: { 
-                    facingMode: facing,
+                video: {
+                    facingMode: { ideal: facing },
                     width: { ideal: 1280 },
                     height: { ideal: 720 }
                 }
@@ -81,10 +84,14 @@ export default function PublicRegistrationPage() {
             setFacingMode(facing);
             setUseCamera(true);
             setPhotoPreview(null);
-            
-            if (videoRef.current) {
-                videoRef.current.srcObject = newStream;
-            }
+
+            // Stream video element sathe attach karo
+            setTimeout(() => {
+                if (videoRef.current) {
+                    videoRef.current.srcObject = newStream;
+                }
+            }, 100);
+
         } catch (err) {
             console.error('Camera error:', err);
             alert('Camera access denied or not available');
@@ -106,19 +113,21 @@ export default function PublicRegistrationPage() {
 
     const capturePhoto = () => {
         if (!videoRef.current) return;
+        const video = videoRef.current;
         const canvas = document.createElement('canvas');
-        canvas.width = videoRef.current.videoWidth;
-        canvas.height = videoRef.current.videoHeight;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
         if (facingMode === 'user') {
+            // Front camera — saved photo flip correct karo (mirror hatavo)
             ctx.translate(canvas.width, 0);
             ctx.scale(-1, 1);
         }
-        
-        ctx.drawImage(videoRef.current, 0, 0);
-        
+        // Back camera — normal draw, koi flip nahi
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
         canvas.toBlob((blob) => {
             if (blob) {
                 setPhotoFile(blob);
@@ -219,9 +228,9 @@ export default function PublicRegistrationPage() {
         <main className="main-viewport">
             {/* Banner */}
             <div className="banner-container">
-                <img 
-                    src="/keshav-cup-banner.jpg" 
-                    alt="Keshav Cup Banner" 
+                <img
+                    src="/keshav-cup-banner.jpg"
+                    alt="Keshav Cup Banner"
                     className="banner-img"
                 />
             </div>
@@ -308,7 +317,7 @@ export default function PublicRegistrationPage() {
                     <div className="card-q">
                         <label className="q-label">Your Photo (Half body Portrait photo) *</label>
                         <p className="photo-hint">Upload 1 supported file. Max 10 MB.</p>
-                        
+
                         {!useCamera && (
                             <div className="btn-upload-container">
                                 <button type="button" onClick={() => fileInputRef.current?.click()} className="btn-upload">
@@ -317,22 +326,40 @@ export default function PublicRegistrationPage() {
                                 <button type="button" onClick={() => startCamera('environment')} className="btn-upload">
                                     <Camera size={18} /> Take Photo
                                 </button>
-                                <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoChange} />
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    style={{ display: 'none' }}
+                                    onChange={handlePhotoChange}
+                                />
                             </div>
                         )}
 
                         {useCamera && (
                             <div className="camera-overlay">
+                                <div className="camera-label">
+                                    {facingMode === 'environment' ? '📷 Back Camera' : '🤳 Front Camera'}
+                                </div>
                                 <div className="video-container">
-                                    <video 
-                                        ref={videoRef} 
-                                        autoPlay 
-                                        playsInline 
-                                        className={facingMode === 'user' ? 'mirrored' : ''}
+                                    <video
+                                        ref={videoRef}
+                                        autoPlay
+                                        playsInline
+                                        // Front camera preview mirror dikhao (natural selfie)
+                                        // Back camera — normal
+                                        style={{
+                                            width: '100%',
+                                            height: 'auto',
+                                            background: '#000',
+                                            transform: facingMode === 'user' ? 'scaleX(-1)' : 'none'
+                                        }}
                                     />
                                 </div>
                                 <div className="camera-controls">
-                                    <button type="button" onClick={stopCamera} className="btn-cam-action">Cancel</button>
+                                    <button type="button" onClick={stopCamera} className="btn-cam-action">
+                                        Cancel
+                                    </button>
                                     <button type="button" onClick={capturePhoto} className="btn-cam-capture">
                                         <div className="capture-inner" />
                                     </button>
@@ -526,23 +553,29 @@ export default function PublicRegistrationPage() {
                 }
                 .photo-preview-img { width: 100%; height: 100%; object-fit: cover; }
 
-                .mirrored { transform: scaleX(-1); }
+                /* Camera UI */
                 .camera-overlay {
-                    position: relative;
                     width: 100%;
                     background: #000;
                     border-radius: 12px;
                     overflow: hidden;
                     margin-bottom: 15px;
                 }
+                .camera-label {
+                    text-align: center;
+                    color: #fff;
+                    font-size: 0.85rem;
+                    padding: 8px;
+                    background: rgba(0,0,0,0.7);
+                    font-weight: 600;
+                }
                 .video-container { width: 100%; line-height: 0; }
-                .video-container video { width: 100%; height: auto; background: #000; }
                 .camera-controls {
                     display: flex;
                     align-items: center;
                     justify-content: space-around;
                     padding: 20px;
-                    background: rgba(0,0,0,0.5);
+                    background: rgba(0,0,0,0.8);
                 }
                 .btn-cam-action {
                     background: transparent;
@@ -554,13 +587,14 @@ export default function PublicRegistrationPage() {
                     align-items: center;
                     justify-content: center;
                     min-width: 60px;
+                    font-weight: 600;
                 }
                 .btn-cam-capture {
-                    width: 64px;
-                    height: 64px;
+                    width: 70px;
+                    height: 70px;
                     border-radius: 50%;
                     background: #fff;
-                    border: 4px solid rgba(255,255,255,0.3);
+                    border: 4px solid rgba(255,255,255,0.4);
                     padding: 0;
                     cursor: pointer;
                     display: flex;
@@ -568,13 +602,15 @@ export default function PublicRegistrationPage() {
                     justify-content: center;
                 }
                 .capture-inner {
-                    width: 48px;
-                    height: 48px;
+                    width: 54px;
+                    height: 54px;
                     border-radius: 50%;
                     background: #fff;
-                    border: 2px solid #000;
+                    border: 2px solid #333;
+                    transition: transform 0.1s;
                 }
-                .btn-cam-capture:active .capture-inner { transform: scale(0.9); }
+                .btn-cam-capture:active .capture-inner { transform: scale(0.88); }
+
                 .photo-preview-section { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
                 .btn-retake {
                     display: flex;
