@@ -12,7 +12,7 @@ export async function POST(req: Request) {
 
         // Verification check to prevent unauthorized sync
         // Using the requested password itself as the verification for simplicity
-        if (password !== 'bapspetlad') {
+        if (password !== 'bapspetladyuva') {
             return NextResponse.json({ error: 'Incorrect verification password' }, { status: 401 });
         }
 

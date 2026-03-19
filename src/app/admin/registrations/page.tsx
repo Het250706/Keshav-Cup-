@@ -163,15 +163,11 @@ function RegistrationControlContent() {
 
 
     const updateRegistrationSlot = async (id: string, newSlot: string) => {
-        const { error } = await supabase.from('registrations').update({ occupation: newSlot }).eq('id', id);
+        const { error } = await supabase.from('registrations').update({ slot: newSlot }).eq('id', id);
         if (error) {
             alert('Failed to update slot: ' + error.message);
         } else {
-            setRegistrations(prev => prev.map(p => p.id === id ? { ...p, occupation: newSlot } : p));
-            // Add to local session slots if not "Unassigned"
-            if (newSlot !== 'Unassigned') {
-                setAllSlots(prev => prev.includes(newSlot) ? prev : [...prev, newSlot].sort());
-            }
+            setRegistrations(prev => prev.map(p => p.id === id ? { ...p, slot: newSlot } : p));
         }
     };
 
@@ -375,7 +371,7 @@ function RegistrationControlContent() {
                                                 </div>
                                             ) : (
                                                 <select
-                                                    value={p.occupation || 'Unassigned'}
+                                                    value={p.slot || 'Unassigned'}
                                                     onChange={(e) => {
                                                         if (e.target.value === '+ New Slot') {
                                                             setEditingSlotId(p.id);
@@ -398,13 +394,8 @@ function RegistrationControlContent() {
                                                     }}
                                                 >
                                                     <option value="Unassigned" style={{ background: '#0a0a0a', color: '#fff' }}>Unassigned</option>
-                                                    {/* Session slots */}
-                                                    {allSlots.map(slot => (
-                                                        <option key={slot} value={slot} style={{ background: '#0a0a0a', color: '#fff' }}>{slot}</option>
-                                                    ))}
-                                                    {/* Always show current slot even if not in session list yet */}
-                                                    {p.occupation && p.occupation !== 'Unassigned' && !allSlots.includes(p.occupation) && (
-                                                        <option key={p.occupation} value={p.occupation} style={{ background: '#0a0a0a', color: '#fff' }}>{p.occupation}</option>
+                                                    {p.slot && p.slot !== 'Unassigned' && (
+                                                        <option value={p.slot} style={{ background: '#0a0a0a', color: '#fff' }}>{p.slot}</option>
                                                     )}
                                                     <option value="+ New Slot" style={{ background: '#0a0a0a', color: 'var(--primary)', fontWeight: 800 }}>+ New Slot</option>
                                                 </select>

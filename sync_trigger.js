@@ -6,7 +6,7 @@ async function sync() {
         const response = await fetch('http://localhost:3000/api/auth/sync-admin', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: 'bapspetlad' })
+            body: JSON.stringify({ password: 'bapspetladyuva' })
         });
         const data = await response.json();
         console.log('Sync result:', JSON.stringify(data, null, 2));
