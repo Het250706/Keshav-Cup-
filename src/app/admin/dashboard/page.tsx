@@ -414,7 +414,7 @@ function AdminDashboardContent() {
                             </div>
                             <div>
                                 <h3 style={{ fontSize: '1.2rem', fontWeight: 950, marginBottom: '4px' }}>BIG SCREEN</h3>
-                                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 800 }}>Broadcast (IPL Style)</p>
+                                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 800 }}>Broadcast (Keshav Cup Style)</p>
                             </div>
                         </motion.div>
                     </div>

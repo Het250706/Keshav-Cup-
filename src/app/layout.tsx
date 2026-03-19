@@ -7,7 +7,7 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: "IPL Cricket Auction | Real-Time Bidding",
+  title: "Keshav Cup Cricket Auction | Real-Time Bidding",
   description: "The ultimate real-time cricket auction platform. Bid on your favorite players and build your dream team.",
 };
 

@@ -80,7 +80,7 @@ export default function HomePage() {
                 fontWeight: 700,
                 letterSpacing: '3px'
               }}>
-                ENTERPRISE CRICKET AUCTION
+                KESHAV CUP CRICKET AUCTION
               </p>
               <p style={{
                 fontSize: 'clamp(1rem, 2vw, 1.1rem)',
@@ -169,7 +169,7 @@ export default function HomePage() {
             >
               {[
                 { icon: Zap, title: 'Real-Time', desc: 'Live WebSocket sync' },
-                { icon: Shield, title: 'Enterprise', desc: 'Secure & Reliable' },
+                { icon: Shield, title: 'Keshav Cup', desc: 'Secure & Reliable' },
                 { icon: Star, title: 'Compliant', desc: 'Atomic transactions' },
               ].map((feature, i) => (
                 <div key={i} className="glass" style={{
