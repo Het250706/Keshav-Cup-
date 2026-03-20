@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import Navbar from '@/components/Navbar';
-import { Search, Trash2, Camera, RefreshCw, Loader2, Upload } from 'lucide-react';
+import { Search, Trash2, Camera, RefreshCw, Upload } from 'lucide-react';
 import RoleGuard from '@/components/RoleGuard';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fixPhotoUrl } from '@/lib/utils';
@@ -23,7 +23,6 @@ function RegistrationControlContent() {
     const [uploadingId, setUploadingId] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [hidePushed, setHidePushed] = useState(true);
-    const [allSlots, setAllSlots] = useState<string[]>([]);
     const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
     const [newSlotInput, setNewSlotInput] = useState('');
 
@@ -49,29 +48,24 @@ function RegistrationControlContent() {
         setLoading(false);
     };
 
-
     const uploadPhoto = async (fileOrBlob: File | Blob) => {
         if (!selectedPlayer) return;
         setUploadingId(selectedPlayer.id);
         setShowModal(false);
 
         try {
-            // 1. Create unique filename based on mobile
             const fileName = `${selectedPlayer.mobile || Date.now()}.jpg`;
 
-            // 2. Upload to Storage (bucket: player-photos)
             const { error: uploadError } = await supabase.storage
                 .from('player-photos')
                 .upload(fileName, fileOrBlob, { upsert: true });
 
             if (uploadError) throw uploadError;
 
-            // 3. Get Public URL
             const { data: { publicUrl } } = supabase.storage
                 .from('player-photos')
                 .getPublicUrl(fileName);
 
-            // 4. Update Registration Table
             const { error: regErr } = await supabase
                 .from('registrations')
                 .update({ photo: publicUrl })
@@ -134,7 +128,6 @@ function RegistrationControlContent() {
         }, 'image/jpeg', 0.8);
     };
 
-
     const pushToPool = async (player: any) => {
         if (!confirm(`Push ${player.name} to the main player pool?`)) return;
         setPushingId(player.id);
@@ -146,7 +139,6 @@ function RegistrationControlContent() {
             });
             const result = await res.json();
             if (result.success) {
-                // Update local state to mark as pushed
                 setRegistrations(prev => prev.map(p =>
                     p.id === player.id ? { ...p, is_pushed: true } : p
                 ));
@@ -160,7 +152,6 @@ function RegistrationControlContent() {
             setPushingId(null);
         }
     };
-
 
     const updateRegistrationSlot = async (id: string, newSlot: string) => {
         const { error } = await supabase.from('registrations').update({ slot: newSlot }).eq('id', id);
@@ -183,12 +174,47 @@ function RegistrationControlContent() {
     };
 
     const deleteRegistration = async (id: string) => {
-        if (!confirm('Are you sure you want to delete this registration?')) return;
-        const { error } = await supabase.from('registrations').delete().eq('id', id);
-        if (error) {
-            alert('Delete failed: ' + error.message);
+        const player = registrations.find(p => p.id === id);
+        if (!player) return;
+
+        if (player.is_pushed) {
+            // Pushed player — players table ma thi remove + is_pushed reset
+            if (!confirm(`${player.name} is already pushed to Player Pool.\n\nThis will:\n✅ Remove from Player Pool\n✅ Keep in Registration Control\n✅ Allow re-pushing later\n\nContinue?`)) return;
+
+            // 1. Players table ma thi delete karo
+            const nameParts = player.name?.split(' ') || ['Unknown', 'Player'];
+            const firstName = nameParts[0];
+            const lastName = nameParts.slice(1).join(' ') || 'Player';
+
+            await supabase
+                .from('players')
+                .delete()
+                .eq('first_name', firstName)
+                .eq('last_name', lastName);
+
+            // 2. Registration ma is_pushed = false karo
+            const { error } = await supabase
+                .from('registrations')
+                .update({ is_pushed: false })
+                .eq('id', id);
+
+            if (error) {
+                alert('Failed: ' + error.message);
+            } else {
+                setRegistrations(prev => prev.map(p =>
+                    p.id === id ? { ...p, is_pushed: false } : p
+                ));
+                alert(`${player.name} removed from Player Pool. Can be re-pushed anytime.`);
+            }
         } else {
-            setRegistrations(prev => prev.filter(p => p.id !== id));
+            // Not pushed — permanently delete
+            if (!confirm(`Permanently delete ${player.name}'s registration?`)) return;
+            const { error } = await supabase.from('registrations').delete().eq('id', id);
+            if (error) {
+                alert('Delete failed: ' + error.message);
+            } else {
+                setRegistrations(prev => prev.filter(p => p.id !== id));
+            }
         }
     };
 
@@ -296,21 +322,13 @@ function RegistrationControlContent() {
                                         <td style={tdStyle}>
                                             <div
                                                 style={{
-                                                    width: '56px',
-                                                    height: '56px',
-                                                    borderRadius: '12px',
-                                                    overflow: 'hidden',
-                                                    background: '#111',
-                                                    margin: '0 auto',
-                                                    position: 'relative',
-                                                    cursor: 'pointer',
+                                                    width: '56px', height: '56px', borderRadius: '12px',
+                                                    overflow: 'hidden', background: '#111', margin: '0 auto',
+                                                    position: 'relative', cursor: 'pointer',
                                                     border: '1px solid rgba(255,255,255,0.1)'
                                                 }}
                                                 className="photo-container"
-                                                onClick={() => {
-                                                    setSelectedPlayer(p);
-                                                    setShowModal(true);
-                                                }}
+                                                onClick={() => { setSelectedPlayer(p); setShowModal(true); }}
                                             >
                                                 <img
                                                     src={fixPhotoUrl(p.photo, p.name)}
@@ -318,9 +336,7 @@ function RegistrationControlContent() {
                                                     style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: uploadingId === p.id ? 0.3 : 1 }}
                                                     onError={(e) => { (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(p.name || 'Player')}`; }}
                                                 />
-                                                <div className="photo-overlay">
-                                                    <Camera size={18} />
-                                                </div>
+                                                <div className="photo-overlay"><Camera size={18} /></div>
                                                 {uploadingId === p.id && (
                                                     <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                                         <RefreshCw size={18} className="rotate" />
@@ -352,14 +368,9 @@ function RegistrationControlContent() {
                                                         placeholder="Name..."
                                                         onKeyDown={(e) => e.key === 'Enter' && confirmNewSlot(p.id)}
                                                         style={{
-                                                            background: '#0a0a0a',
-                                                            border: '1px solid var(--primary)',
-                                                            color: '#fff',
-                                                            fontSize: '0.7rem',
-                                                            padding: '5px',
-                                                            borderRadius: '4px',
-                                                            width: '65%',
-                                                            outline: 'none'
+                                                            background: '#0a0a0a', border: '1px solid var(--primary)',
+                                                            color: '#fff', fontSize: '0.7rem', padding: '5px',
+                                                            borderRadius: '4px', width: '65%', outline: 'none'
                                                         }}
                                                     />
                                                     <button
@@ -381,16 +392,10 @@ function RegistrationControlContent() {
                                                         }
                                                     }}
                                                     style={{
-                                                        background: '#0a0a0a',
-                                                        border: '1px solid rgba(255,255,255,0.2)',
-                                                        color: '#fff',
-                                                        fontSize: '0.7rem',
-                                                        padding: '5px',
-                                                        borderRadius: '6px',
-                                                        width: '90%',
-                                                        fontWeight: 700,
-                                                        outline: 'none',
-                                                        cursor: 'pointer'
+                                                        background: '#0a0a0a', border: '1px solid rgba(255,255,255,0.2)',
+                                                        color: '#fff', fontSize: '0.7rem', padding: '5px',
+                                                        borderRadius: '6px', width: '90%', fontWeight: 700,
+                                                        outline: 'none', cursor: 'pointer'
                                                     }}
                                                 >
                                                     <option value="Unassigned" style={{ background: '#0a0a0a', color: '#fff' }}>Unassigned</option>
@@ -407,17 +412,13 @@ function RegistrationControlContent() {
                                                 disabled={pushingId === p.id || p.is_pushed}
                                                 className="push-btn"
                                                 style={{
-                                                    padding: '10px 24px',
-                                                    borderRadius: '10px',
+                                                    padding: '10px 24px', borderRadius: '10px',
                                                     background: p.is_pushed ? 'rgba(0, 255, 128, 0.05)' : 'rgba(255,215,0,0.05)',
                                                     border: `1px solid ${p.is_pushed ? 'rgba(0, 255, 128, 0.3)' : 'rgba(255, 215, 0, 0.3)'}`,
                                                     color: p.is_pushed ? '#00ff80' : 'var(--primary)',
-                                                    fontWeight: 900,
-                                                    fontSize: '0.65rem',
+                                                    fontWeight: 900, fontSize: '0.65rem',
                                                     cursor: p.is_pushed ? 'default' : 'pointer',
-                                                    textTransform: 'uppercase',
-                                                    transition: 'all 0.2s ease',
-                                                    letterSpacing: '0px'
+                                                    textTransform: 'uppercase', transition: 'all 0.2s ease'
                                                 }}
                                             >
                                                 {pushingId === p.id ? '...' : p.is_pushed ? 'PUSHED' : 'PUSH'}
@@ -427,12 +428,11 @@ function RegistrationControlContent() {
                                             <button
                                                 onClick={() => deleteRegistration(p.id)}
                                                 style={{
-                                                    background: 'none',
-                                                    border: 'none',
-                                                    color: '#ff4b4b',
-                                                    cursor: 'pointer',
-                                                    opacity: 0.7
+                                                    background: 'none', border: 'none',
+                                                    color: p.is_pushed ? '#ffd700' : '#ff4b4b',
+                                                    cursor: 'pointer', opacity: 0.7
                                                 }}
+                                                title={p.is_pushed ? 'Remove from Player Pool' : 'Delete Registration'}
                                             >
                                                 <Trash2 size={20} />
                                             </button>
@@ -449,25 +449,24 @@ function RegistrationControlContent() {
             <AnimatePresence>
                 {showModal && (
                     <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                         style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)' }}
                     >
                         <motion.div
-                            initial={{ scale: 0.9, y: 20 }}
-                            animate={{ scale: 1, y: 0 }}
+                            initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
                             className="glass"
                             style={{ padding: '40px', borderRadius: '24px', width: '450px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.1)' }}
                         >
                             <h2 style={{ fontSize: '1.8rem', fontWeight: 950, marginBottom: '10px' }}>UPDATE PHOTO</h2>
-                            <p style={{ color: '#888', marginBottom: '30px', fontSize: '0.9rem', fontWeight: 600 }}>Update profile picture for <span style={{ color: 'var(--primary)' }}>{selectedPlayer?.name}</span></p>
+                            <p style={{ color: '#888', marginBottom: '30px', fontSize: '0.9rem', fontWeight: 600 }}>
+                                Update profile picture for <span style={{ color: 'var(--primary)' }}>{selectedPlayer?.name}</span>
+                            </p>
 
                             {!useCamera ? (
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
                                     <button
                                         onClick={() => fileInputRef.current?.click()}
-                                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '20px', borderRadius: '16px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', transition: '0.2s' }}
+                                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '20px', borderRadius: '16px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}
                                         className="modal-btn"
                                     >
                                         <Upload size={24} color="var(--primary)" />
@@ -475,16 +474,14 @@ function RegistrationControlContent() {
                                     </button>
                                     <button
                                         onClick={startCamera}
-                                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '20px', borderRadius: '16px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', transition: '0.2s' }}
+                                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '20px', borderRadius: '16px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}
                                         className="modal-btn"
                                     >
                                         <Camera size={24} color="var(--primary)" />
                                         <span style={{ fontWeight: 800, fontSize: '0.8rem' }}>TAKE PHOTO</span>
                                     </button>
                                     <input
-                                        ref={fileInputRef}
-                                        type="file"
-                                        accept="image/*"
+                                        ref={fileInputRef} type="file" accept="image/*"
                                         style={{ display: 'none' }}
                                         onChange={(e) => e.target.files?.[0] && uploadPhoto(e.target.files[0])}
                                     />
@@ -501,16 +498,10 @@ function RegistrationControlContent() {
                                         <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                     </div>
                                     <div style={{ display: 'flex', gap: '10px' }}>
-                                        <button
-                                            onClick={capturePhoto}
-                                            style={{ flex: 1, padding: '15px', borderRadius: '12px', background: 'var(--primary)', color: '#000', fontWeight: 900, border: 'none', cursor: 'pointer' }}
-                                        >
+                                        <button onClick={capturePhoto} style={{ flex: 1, padding: '15px', borderRadius: '12px', background: 'var(--primary)', color: '#000', fontWeight: 900, border: 'none', cursor: 'pointer' }}>
                                             CAPTURE PHOTO
                                         </button>
-                                        <button
-                                            onClick={stopCamera}
-                                            style={{ padding: '15px', borderRadius: '12px', background: 'rgba(255,75,75,0.1)', color: '#ff4b4b', fontWeight: 900, border: '1px solid #ff4b4b', cursor: 'pointer' }}
-                                        >
+                                        <button onClick={stopCamera} style={{ padding: '15px', borderRadius: '12px', background: 'rgba(255,75,75,0.1)', color: '#ff4b4b', fontWeight: 900, border: '1px solid #ff4b4b', cursor: 'pointer' }}>
                                             CANCEL
                                         </button>
                                     </div>
@@ -527,17 +518,12 @@ function RegistrationControlContent() {
                 .table-row-hover:hover { background: rgba(255,255,255,0.02); }
                 .push-btn:hover { background: var(--primary) !important; color: #000 !important; }
                 th { color: #888; letter-spacing: 1px; }
-                
                 .photo-container:hover .photo-overlay { opacity: 1; }
                 .photo-overlay {
-                    position: absolute;
-                    inset: 0;
+                    position: absolute; inset: 0;
                     background: rgba(0,0,0,0.6);
-                    display: flex;
-                    alignItems: center;
-                    justify-content: center;
-                    opacity: 0;
-                    transition: all 0.2s ease;
+                    display: flex; align-items: center; justify-content: center;
+                    opacity: 0; transition: all 0.2s ease;
                     color: var(--primary);
                 }
                 .modal-btn:hover {
@@ -551,17 +537,10 @@ function RegistrationControlContent() {
 }
 
 const thStyle: React.CSSProperties = {
-    padding: '10px',
-    fontSize: '0.65rem',
-    fontWeight: 900,
-    textAlign: 'center',
-    textTransform: 'uppercase',
-    whiteSpace: 'nowrap'
+    padding: '10px', fontSize: '0.65rem', fontWeight: 900,
+    textAlign: 'center', textTransform: 'uppercase', whiteSpace: 'nowrap'
 };
 
 const tdStyle: React.CSSProperties = {
-    padding: '8px 10px',
-    textAlign: 'center',
-    fontSize: '0.8rem',
-    color: '#ddd'
+    padding: '8px 10px', textAlign: 'center', fontSize: '0.8rem', color: '#ddd'
 };

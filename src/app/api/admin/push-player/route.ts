@@ -31,23 +31,57 @@ export async function POST(req: Request) {
             }
         }
 
-        // 1. Insert into "players" table
-        const { data: insertedData, error: insertError } = await supabaseAdmin
+        // 1. Check if player already exists in the "players" table by name
+        // (Since no unique constraint exists in the DB for onConflict to work, we handle it manually)
+        const { data: existingPlayer } = await supabaseAdmin
             .from('players')
-            .insert([{
-                first_name: firstName,
-                last_name: lastName,
-                cricket_skill: player.role || 'All-rounder',
-                role: player.role || 'All-rounder',
-                category: player.occupation || 'Unassigned', 
-                batting_style: player.age?.toString() || '20',
-                base_price: player.base_price || 20000000,
-                photo_url: finalPhoto,
-                auction_status: 'pending',
-                was_present_kc3: player.city || player.was_present_kc3 || 'No'
-            }])
-            .select();
+            .select('id')
+            .eq('first_name', firstName)
+            .eq('last_name', lastName)
+            .maybeSingle();
 
+        let insertError;
+        let insertedData;
+
+        if (existingPlayer) {
+            // Update existing player
+            const { data, error } = await supabaseAdmin
+                .from('players')
+                .update({
+                    cricket_skill: player.role || 'All-rounder',
+                    role: player.role || 'All-rounder',
+                    category: player.slot || player.occupation || 'Unassigned',
+                    batting_style: player.age?.toString() || '20',
+                    base_price: player.base_price || 20000000,
+                    photo_url: finalPhoto,
+                    was_present_kc3: player.city || player.was_present_kc3 || 'No'
+                })
+                .eq('id', existingPlayer.id)
+                .select();
+            
+            insertError = error;
+            insertedData = data;
+        } else {
+            // Insert new player
+            const { data, error } = await supabaseAdmin
+                .from('players')
+                .insert([{
+                    first_name: firstName,
+                    last_name: lastName,
+                    cricket_skill: player.role || 'All-rounder',
+                    role: player.role || 'All-rounder',
+                    category: player.slot || player.occupation || 'Unassigned',
+                    batting_style: player.age?.toString() || '20',
+                    base_price: player.base_price || 20000000,
+                    photo_url: finalPhoto,
+                    auction_status: 'pending',
+                    was_present_kc3: player.city || player.was_present_kc3 || 'No'
+                }])
+                .select();
+            
+            insertError = error;
+            insertedData = data;
+        }
         if (insertError) {
             console.error('Push to Player Pool Error:', insertError);
             return NextResponse.json({ error: insertError.message }, { status: 500 });
@@ -63,10 +97,10 @@ export async function POST(req: Request) {
             console.warn('Player pushed but failed to update status in registrations:', updateError);
         }
 
-        return NextResponse.json({ 
-            success: true, 
+        return NextResponse.json({
+            success: true,
             message: 'Player moved to pool successfully',
-            data: insertedData[0]
+            data: insertedData && insertedData.length > 0 ? insertedData[0] : null
         });
 
     } catch (err: any) {

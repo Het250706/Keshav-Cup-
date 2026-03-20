@@ -16,7 +16,7 @@ export default function ScoreboardPage() {
 
     useEffect(() => {
         fetchScore();
-        
+
         // Subscription for Realtime Updates
         const channel = supabase.channel('scoreboard_sync')
             .on('postgres_changes', { event: '*', table: 'innings', schema: 'public' }, () => fetchScore())
@@ -75,8 +75,6 @@ export default function ScoreboardPage() {
     );
 
     const currentInn = innings.find(inn => !inn.is_completed) || innings[innings.length - 1];
-    const battingTeam = currentInn?.batting_team_id === match.team1_id ? match.team1 : match.team2;
-    const bowlingTeam = currentInn?.batting_team_id === match.team1_id ? match.team2 : match.team1;
 
     return (
         <main style={{ minHeight: '100vh', background: '#000', color: '#fff', padding: '20px' }}>
@@ -85,7 +83,7 @@ export default function ScoreboardPage() {
                 {/* Status Bar */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', background: 'rgba(255,255,255,0.03)', padding: '15px 30px', borderRadius: '50px', border: '1px solid var(--border)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                        <div style={{ width: '10px', height: '100%', aspectRatio: '1', borderRadius: '50%', background: match.status === 'live' ? '#00ff80' : '#ff4b4b', boxShadow: match.status === 'live' ? '0 0 10px #00ff80' : 'none' }} />
+                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: match.status === 'live' ? '#00ff80' : '#ff4b4b', boxShadow: match.status === 'live' ? '0 0 10px #00ff80' : 'none' }} />
                         <span style={{ fontWeight: 900, fontSize: '0.9rem', letterSpacing: '1px' }}>{(match.status || 'Live').toUpperCase()}</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-muted)' }}>
@@ -176,7 +174,7 @@ export default function ScoreboardPage() {
                                 <div>
                                     <div style={{ fontSize: '0.6rem', fontWeight: 900, color: 'var(--text-muted)', textTransform: 'uppercase' }}>BOWLER</div>
                                     <div style={{ fontWeight: 800 }}>
-                                    {(() => {
+                                        {(() => {
                                             const player = stats.find(s => s.player_id === currentInn.bowler_id);
                                             return player ? `${player.players?.first_name} ${player.players?.last_name}` : 'Waiting...';
                                         })()}
@@ -247,7 +245,7 @@ export default function ScoreboardPage() {
                 {nextMatch && (
                     <div className="glass" style={{ padding: '25px', borderRadius: '30px', marginTop: '30px', border: '1px dashed var(--primary)', textAlign: 'center' }}>
                         <div style={{ fontSize: '0.7rem', color: 'var(--primary)', fontWeight: 900, letterSpacing: '2px', marginBottom: '10px' }}>UPCOMING MATCH</div>
-                         <div style={{ fontSize: '1.3rem', fontWeight: 950 }}>
+                        <div style={{ fontSize: '1.3rem', fontWeight: 950 }}>
                             {nextMatch.team1?.name} <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: '0 15px' }}>VS</span> {nextMatch.team2?.name}
                         </div>
                         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '5px' }}>{nextMatch.match_name} • {nextMatch.venue}</div>
