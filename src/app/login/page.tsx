@@ -48,6 +48,12 @@ export default function CaptainLoginPage() {
         const loginEmail = captainEmail.trim();
         const loginPassword = password.trim();
 
+        if (loginPassword !== CAPTAIN_PASSWORD) {
+            setError('Incorrect password. Please Enter correct password for captain access.');
+            setLoading(false);
+            return;
+        }
+
         try {
             // 1. Try to sign in via standard client first
             let { data, error: authError } = await supabase.auth.signInWithPassword({
@@ -215,10 +221,10 @@ export default function CaptainLoginPage() {
                             justifyContent: 'center',
                             margin: '0 auto 25px',
                         }}>
-                            <img 
-                                src="/logo.png" 
-                                alt="Logo" 
-                                style={{ width: '100%', height: 'auto' }} 
+                            <img
+                                src="/logo.png"
+                                alt="Logo"
+                                style={{ width: '100%', height: 'auto' }}
                             />
                         </div>
                         <h1 className="title-gradient" style={{ fontSize: '2.5rem', marginBottom: '12px', fontWeight: 900, letterSpacing: '-1px' }}>
