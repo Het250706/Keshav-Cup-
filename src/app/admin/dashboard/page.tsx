@@ -20,7 +20,7 @@ export default function AdminDashboardPage() {
 }
 
 function AdminDashboardContent() {
-    const thStyle: React.CSSProperties = { padding: '10px', color: '#888', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', whiteSpace: 'nowrap', textAlign: 'center' };
+    const thStyle: React.CSSProperties = { padding: '10px', color: '#aaa', fontSize: '0.85rem', fontWeight: 950, textTransform: 'uppercase', whiteSpace: 'nowrap', textAlign: 'center' };
     const tdStyle: React.CSSProperties = { padding: '10px', fontSize: '0.8rem', textAlign: 'center', color: '#ddd' };
 
     const [players, setPlayers] = useState<any[]>([]);
@@ -502,39 +502,6 @@ function AdminDashboardContent() {
                                             ACTIVE SLOT: {selectedSlot}
                                         </div>
                                     )}
-                                    <button
-                                        onClick={async () => {
-                                            if (!confirm('🔄 RESTORE ALL PLAYERS from Google Sheet? This will re-import all registered players into the pool.')) return;
-                                            setSyncing(true);
-                                            try {
-                                                const res = await fetch('/api/admin/bulk-push', { method: 'POST' });
-                                                const data = await res.json();
-                                                if (data.success) {
-                                                    alert(`✅ Restored ${data.pushed} players!\nSkipped: ${data.skipped} (already exist)\n\n${data.message}`);
-                                                    fetchData();
-                                                } else {
-                                                    throw new Error(data.error || 'Restore failed');
-                                                }
-                                            } catch (err: any) {
-                                                alert('Error: ' + err.message);
-                                            } finally {
-                                                setSyncing(false);
-                                            }
-                                        }}
-                                        disabled={syncing}
-                                        style={{
-                                            background: 'rgba(0, 255, 128, 0.1)',
-                                            color: '#00ff80',
-                                            border: '1px solid rgba(0, 255, 128, 0.3)',
-                                            padding: '6px 15px',
-                                            borderRadius: '8px',
-                                            fontSize: '0.7rem',
-                                            fontWeight: 900,
-                                            cursor: syncing ? 'not-allowed' : 'pointer'
-                                        }}
-                                    >
-                                        {syncing ? 'RESTORING...' : '🔄 RESTORE ALL PLAYERS'}
-                                    </button>
                                 </div>
                             </div>
                             <div className="scrollable-table" style={{ maxHeight: 'calc(100vh - 250px)', overflowY: 'auto', overflowX: 'auto' }}>
@@ -562,9 +529,10 @@ function AdminDashboardContent() {
                                         ) : players.map((p) => (
                                             <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }} className="table-row-hover">
                                                 <td style={tdStyle}>
-                                                    <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#222', overflow: 'hidden', margin: '0 auto', border: '1px solid rgba(255,255,255,0.1)' }}>
+                                                    <div className="admin-photo-container" style={{ width: '46px', height: '46px', borderRadius: '12px', background: '#222', overflow: 'hidden', margin: '0 auto', border: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}>
                                                         <img
                                                             src={fixPhotoUrl(p.photo_url || p.photo, p.first_name)}
+                                                            className="admin-photo"
                                                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                                             alt=""
                                                             onError={(e) => {
@@ -574,10 +542,10 @@ function AdminDashboardContent() {
                                                     </div>
                                                 </td>
                                                 <td style={{ ...tdStyle, textAlign: 'left' }}>
-                                                    <div style={{ fontWeight: 800, color: '#fff' }}>{p.first_name} {p.last_name}</div>
+                                                    <div style={{ fontWeight: 800, color: '#fff', fontSize: '1.2rem' }}>{p.first_name} {p.last_name}</div>
                                                 </td>
                                                 <td style={tdStyle}>
-                                                    <div style={{ fontWeight: 700 }}>{p.cricket_skill || p.role}</div>
+                                                    <div style={{ fontWeight: 900, fontSize: '1.1rem', color: '#fff' }}>{p.cricket_skill || p.role}</div>
                                                 </td>
                                                 <td style={tdStyle}>
                                                     <div style={{ fontWeight: 900, color: (p.was_present_kc3 === 'હા' || p.was_present_kc3 === 'Yes') ? '#00ff80' : '#ff4b4b' }}>
@@ -840,6 +808,23 @@ function AdminDashboardContent() {
             <style jsx>{`
                 .admin-grid { display: grid; grid-template-columns: 1fr 400px; gap: 25px; }
                 @media (max-width: 1100px) { .admin-grid { grid-template-columns: 1fr; } }
+                .admin-photo-container { 
+                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                    z-index: 1;
+                }
+                .admin-photo-container:hover { 
+                    transform: scale(2.5);
+                    z-index: 100;
+                    box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+                    border-color: var(--primary) !important;
+                    border-radius: 8px !important;
+                }
+                .admin-photo {
+                    transition: transform 0.3s ease;
+                }
+                .admin-photo-container:hover .admin-photo {
+                    transform: scale(1.1);
+                }
             `}</style>
         </>
     );

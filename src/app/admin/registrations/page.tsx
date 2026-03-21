@@ -333,6 +333,7 @@ function RegistrationControlContent() {
                                                 <img
                                                     src={fixPhotoUrl(p.photo, p.name)}
                                                     alt=""
+                                                    className="photo-img"
                                                     style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: uploadingId === p.id ? 0.3 : 1 }}
                                                     onError={(e) => { (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(p.name || 'Player')}`; }}
                                                 />
@@ -346,11 +347,11 @@ function RegistrationControlContent() {
                                         </td>
                                         <td style={tdStyle}>
                                             <div style={{ textAlign: 'center' }}>
-                                                <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                                                <div style={{ fontWeight: 800, fontSize: '1.2rem', color: '#fff' }}>{p.name}</div>
                                             </div>
                                         </td>
                                         <td style={tdStyle}>
-                                            <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#fff' }}>{p.role}</div>
+                                            <div style={{ fontWeight: 900, fontSize: '1.1rem', color: '#fff' }}>{p.role}</div>
                                         </td>
                                         <td style={tdStyle}>
                                             <div style={{ fontSize: '0.75rem', fontWeight: 600, color: p.city === 'હા' ? '#00ff80' : '#888' }}>
@@ -526,6 +527,22 @@ function RegistrationControlContent() {
                     opacity: 0; transition: all 0.2s ease;
                     color: var(--primary);
                 }
+                .photo-container { 
+                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important; 
+                    z-index: 1;
+                }
+                .photo-container:hover { 
+                    transform: scale(2.2); 
+                    z-index: 100; 
+                    border-color: var(--primary) !important;
+                    box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+                }
+                .photo-img {
+                    transition: transform 0.3s ease;
+                }
+                .photo-container:hover .photo-img {
+                    transform: scale(1.1);
+                }
                 .modal-btn:hover {
                     background: rgba(255,215,0,0.05) !important;
                     border-color: var(--primary) !important;
@@ -537,8 +554,9 @@ function RegistrationControlContent() {
 }
 
 const thStyle: React.CSSProperties = {
-    padding: '10px', fontSize: '0.65rem', fontWeight: 900,
-    textAlign: 'center', textTransform: 'uppercase', whiteSpace: 'nowrap'
+    padding: '10px', fontSize: '0.85rem', fontWeight: 950,
+    textAlign: 'center', textTransform: 'uppercase', whiteSpace: 'nowrap',
+    color: '#aaa'
 };
 
 const tdStyle: React.CSSProperties = {

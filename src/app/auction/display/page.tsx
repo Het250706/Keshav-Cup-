@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { fixPhotoUrl } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -21,107 +21,157 @@ const COLORS = {
 
 const BROADCAST_NAME = "KESHAV CUP 4.0 PLAYER AUCTION / JAY SWAMINARAYAN";
 
-export default function DisplayAuctionPage() {
+const DisplayAuctionPage = memo(function DisplayAuctionPage() {
     // --- STATE ---
-    const [auctionState, setAuctionState] = useState<any>(null);
-    const [currentPlayer, setCurrentPlayer] = useState<any>(null);
-    const [highestBidTeam, setHighestBidTeam] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
-    
-    // UI Sequence States
-    const [showStamp, setShowStamp] = useState(false);
-    const [showSoldBanner, setShowSoldBanner] = useState(false);
+    const [state, setState] = useState<any>({
+        auctionState: null,
+        currentPlayer: null,
+        highestBidTeam: null,
+        loading: true,
+        showStamp: false,
+        showSoldBanner: false,
+        playedSoldPlayerId: null
+    });
     const [bidNotifications, setBidNotifications] = useState<any[]>([]);
-    const [playedSoldPlayerId, setPlayedSoldPlayerId] = useState<string | null>(null);
 
     // --- REFS ---
     const lastBidValueRef = useRef<number>(0);
     const hammerSoundRef = useRef<HTMLAudioElement | null>(null);
     const bidSoundRef = useRef<HTMLAudioElement | null>(null);
     const isFirstLoadRef = useRef(true);
+    const preloadedImageRef = useRef<HTMLImageElement | null>(null);
 
-    // --- INITIALIZATION ---
-    useEffect(() => {
-        // Hammer sound: gavel/hammer hit
-        hammerSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2143/2143-preview.mp3');
-        // Bid sound: subtle notification or ping
-        bidSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3');
-
-        fetchData();
-
-        const stateSub = supabase.channel('display_realtime_v5')
-            .on('postgres_changes', { event: '*', table: 'auction_state', schema: 'public' }, () => fetchData())
-            .on('postgres_changes', { event: 'INSERT', table: 'bids', schema: 'public' }, (payload: any) => {
-                handleNewBid(payload.new);
-            })
-            .subscribe();
-
-        return () => { supabase.removeChannel(stateSub); };
+    // --- HELPERS ---
+    const fetchPlayer = useCallback(async (id: string) => {
+        if (!id) return null;
+        const { data } = await supabase
+            .from('players')
+            .select('id, first_name, last_name, photo_url, role, base_price, was_present_kc3')
+            .eq('id', id)
+            .single();
+        return data;
     }, []);
 
-    const fetchData = async () => {
+    const fetchTeam = useCallback(async (id: string) => {
+        if (!id) return null;
+        const { data } = await supabase
+            .from('teams')
+            .select('name')
+            .eq('id', id)
+            .single();
+    return data;
+    }, []);
+
+    const triggerSoldSequence = useCallback(async (finalState: any) => {
+        const [player, team] = await Promise.all([
+            finalState.current_player_id ? fetchPlayer(finalState.current_player_id) : Promise.resolve(null),
+            finalState.highest_bid_team_id ? fetchTeam(finalState.highest_bid_team_id) : Promise.resolve(null)
+        ]);
+        
+        setState((prev: any) => ({ 
+            ...prev, 
+            auctionState: finalState, 
+            currentPlayer: player, 
+            highestBidTeam: team,
+            showStamp: true 
+        }));
+
+        hammerSoundRef.current?.play().catch(() => {});
+
+        setTimeout(() => {
+            setState((prev: any) => ({ ...prev, showSoldBanner: true }));
+            
+            setTimeout(() => {
+                setState((prev: any) => ({
+                    ...prev,
+                    auctionState: { ...prev.auctionState, status: 'IDLE' },
+                    currentPlayer: null,
+                    highestBidTeam: null,
+                    showStamp: false,
+                    showSoldBanner: false,
+                    playedSoldPlayerId: null
+                }));
+                setBidNotifications([]);
+                lastBidValueRef.current = 0;
+            }, 6000);
+        }, 2500);
+    }, [fetchPlayer, fetchTeam]);
+
+    const fetchData = useCallback(async () => {
         try {
-            const { data: stateData } = await supabase.from('auction_state').select('*').single();
+            const { data: stateData } = await supabase
+                .from('auction_state')
+                .select('status, current_player_id, highest_bid_team_id, current_highest_bid')
+                .single();
+
             if (stateData) {
-                const statusChanged = stateData.status !== auctionState?.status;
-                const playerChanged = stateData.current_player_id !== auctionState?.current_player_id;
+                const playerChanged = stateData.current_player_id !== state.auctionState?.current_player_id;
 
                 if (stateData.status === 'SOLD') {
-                    // Start sequence only if we haven't played it for THIS player yet
-                    if (playedSoldPlayerId !== stateData.current_player_id) {
-                        setPlayedSoldPlayerId(stateData.current_player_id);
+                    if (state.playedSoldPlayerId !== stateData.current_player_id) {
+                        setState((prev: any) => ({ ...prev, playedSoldPlayerId: stateData.current_player_id }));
                         triggerSoldSequence(stateData);
                     }
                 } else if (stateData.status === 'BIDDING') {
-                    setPlayedSoldPlayerId(null);
-                    setShowStamp(false);
-                    setShowSoldBanner(false);
-                    setAuctionState(stateData);
-                    if (playerChanged) {
-                        fetchPlayer(stateData.current_player_id);
+                    const [player, team] = await Promise.all([
+                        playerChanged ? fetchPlayer(stateData.current_player_id) : Promise.resolve(state.currentPlayer),
+                        fetchTeam(stateData.highest_bid_team_id)
+                    ]);
+
+                    setState((prev: any) => ({
+                        ...prev,
+                        auctionState: stateData,
+                        currentPlayer: player,
+                        highestBidTeam: team,
+                        playedSoldPlayerId: null,
+                        showStamp: false,
+                        showSoldBanner: false,
+                        loading: false
+                    }));
+                    
+                    // Preload next player if current is bidding
+                    if (stateData.current_player_id) {
+                        try {
+                            const { data: nextPlayers } = await supabase
+                                .from('players')
+                                .select('photo_url, first_name')
+                                .is('team_id', null)
+                                .neq('id', stateData.current_player_id)
+                                .limit(1);
+                            
+                            if (nextPlayers?.[0]) {
+                                const url = fixPhotoUrl(nextPlayers[0].photo_url, nextPlayers[0].first_name);
+                                preloadedImageRef.current = new Image();
+                                preloadedImageRef.current.src = url;
+                            }
+                        } catch (e) {}
                     }
-                    fetchTeam(stateData.highest_bid_team_id);
-                } else if (stateData.status === 'IDLE' || !stateData.current_player_id) {
-                    setPlayedSoldPlayerId(null);
-                    setAuctionState(stateData);
-                    setCurrentPlayer(null);
-                    setHighestBidTeam(null);
-                    setShowStamp(false);
-                    setShowSoldBanner(false);
                 } else {
-                    setAuctionState(stateData);
+                    setState((prev: any) => ({
+                        ...prev,
+                        auctionState: stateData,
+                        currentPlayer: null,
+                        highestBidTeam: null,
+                        playedSoldPlayerId: null,
+                        showStamp: false,
+                        showSoldBanner: false,
+                        loading: false
+                    }));
                 }
                 
-                // Track bid increase for notification
                 if (stateData.current_highest_bid > lastBidValueRef.current && stateData.status === 'BIDDING') {
-                    if (!isFirstLoadRef.current) {
-                        bidSoundRef.current?.play().catch(() => {});
-                    }
+                    if (!isFirstLoadRef.current) bidSoundRef.current?.play().catch(() => {});
                     lastBidValueRef.current = stateData.current_highest_bid;
                 }
                 isFirstLoadRef.current = false;
             }
         } catch (err) {
             console.error('Fetch Error:', err);
-        } finally {
-            setLoading(false);
+            setState((prev: any) => ({ ...prev, loading: false }));
         }
-    };
+    }, [state.auctionState, state.currentPlayer, state.playedSoldPlayerId, fetchPlayer, fetchTeam, triggerSoldSequence]);
 
-    const fetchPlayer = async (id: string) => {
-        if (!id) { setCurrentPlayer(null); return; }
-        const { data } = await supabase.from('players').select('*').eq('id', id).single();
-        setCurrentPlayer(data);
-    };
-
-    const fetchTeam = async (id: string) => {
-        if (!id) { setHighestBidTeam(null); return; }
-        const { data } = await supabase.from('teams').select('name').eq('id', id).single();
-        setHighestBidTeam(data);
-    };
-
-    const handleNewBid = async (bid: any) => {
-        // Prevent notifications for older bids or when in sold state
+    const handleNewBid = useCallback(async (bid: any) => {
         const { data: teamData } = await supabase.from('teams').select('name').eq('id', bid.team_id).single();
         const notification = {
             id: Date.now(),
@@ -129,46 +179,37 @@ export default function DisplayAuctionPage() {
             team: teamData?.name
         };
         
-        setBidNotifications((prev: any[]) => [...prev.slice(-2), notification]);
+        setBidNotifications((prev) => [...prev.slice(-2), notification]);
         bidSoundRef.current?.play().catch(() => {});
 
         setTimeout(() => {
-            setBidNotifications((prev: any[]) => prev.filter(n => n.id !== notification.id));
+            setBidNotifications((prev) => prev.filter(n => n.id !== notification.id));
         }, 4000);
-    };
+    }, []);
 
-    const triggerSoldSequence = async (finalState: any) => {
-        // Ensure we have final data
-        if (finalState.current_player_id) await fetchPlayer(finalState.current_player_id);
-        if (finalState.highest_bid_team_id) await fetchTeam(finalState.highest_bid_team_id);
-        
-        setAuctionState(finalState);
+    // --- INITIALIZATION ---
+    useEffect(() => {
+        hammerSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2143/2143-preview.mp3');
+        bidSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3');
 
-        // DELAY A TINY BIT to ensure images/names are loaded if they just changed
-        setTimeout(() => {
-            setShowStamp(true);
-            hammerSoundRef.current?.play().catch(() => {});
+        fetchData();
 
-            setTimeout(() => {
-                setShowSoldBanner(true);
-                
-                setTimeout(() => {
-                    // Reset locally to IDLE view
-                    setAuctionState((prev: any) => prev ? { ...prev, status: 'IDLE' } : null);
-                    setCurrentPlayer(null);
-                    setHighestBidTeam(null);
-                    setShowStamp(false);
-                    setShowSoldBanner(false);
-                    setBidNotifications([]);
-                    lastBidValueRef.current = 0;
-                }, 6000); // Show result for 6 seconds
-            }, 2500); // 2.5s gap between stamp and banner
-        }, 100);
-    };
+        const stateSub = supabase.channel('display_realtime_v6')
+            .on('postgres_changes', { event: 'UPDATE', table: 'auction_state', schema: 'public' }, fetchData)
+            .on('postgres_changes', { event: 'INSERT', table: 'bids', schema: 'public' }, (payload: any) => {
+                handleNewBid(payload.new);
+            })
+            .subscribe();
+
+        return () => { 
+            supabase.removeChannel(stateSub);
+        };
+    }, [fetchData, handleNewBid]);
 
 
-    if (loading) return null;
+    if (state.loading) return null;
 
+    const { auctionState, currentPlayer, highestBidTeam, showStamp, showSoldBanner } = state;
     const isIdle = !auctionState || auctionState.status === 'IDLE' || !currentPlayer;
 
     return (
@@ -181,6 +222,29 @@ export default function DisplayAuctionPage() {
             position: 'relative',
             fontFamily: '"Inter", "Outfit", sans-serif'
         }}>
+            <style jsx global>{`
+                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+                
+                body {
+                    font-family: 'Inter', sans-serif;
+                    background-color: #020617;
+                    margin: 0;
+                    overflow: hidden;
+                    -webkit-font-smoothing: antialiased;
+                }
+
+                .noise-overlay { will-change: transform; pointer-events: none; }
+                .ticker-content { will-change: transform; }
+
+                @keyframes ticker-scroll {
+                    0% { transform: translate3d(0, 0, 0); }
+                    100% { transform: translate3d(-50%, 0, 0); }
+                }
+
+                .ticker-content {
+                    animation: ticker-scroll 30s linear infinite;
+                }
+            `}</style>
             {/* TOP HEADER */}
             <div style={{ 
                 position: 'fixed', 
@@ -191,24 +255,24 @@ export default function DisplayAuctionPage() {
                 textAlign: 'center',
                 pointerEvents: 'none'
             }}>
-                <motion.h2 
-                    initial={{ y: -100, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
+                <h1 
                     style={{ 
-                        fontSize: '5rem', 
-                        fontWeight: 950, 
-                        color: COLORS.white, 
+                        fontSize: '7.5rem', 
+                        fontWeight: 900, 
+                        color: '#ffffff', 
                         margin: 0,
                         textTransform: 'uppercase',
                         letterSpacing: '12px',
-                        textShadow: `0 0 30px ${COLORS.electricBlue}, 0 0 60px ${COLORS.electricBlue}, 0 10px 30px rgba(0,0,0,0.8)`,
-                        background: 'linear-gradient(to bottom, #fff 40%, #888 100%)',
-                        WebkitBackgroundClip: 'text',
-                        WebkitTextFillColor: 'transparent'
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '40px'
                     } as any}
                 >
-                    KESHAV CUP 4.0 PLAYER AUCTION
-                </motion.h2>
+                    <img src="/logo.png" style={{ height: '110px', width: 'auto' }} />
+                    <span>KESHAV CUP 4.0 PLAYER AUCTION</span>
+                    <img src="/logo.png" style={{ height: '110px', width: 'auto' }} />
+                </h1>
             </div>
 
             {/* Ambient Background Glows */}
@@ -269,24 +333,26 @@ export default function DisplayAuctionPage() {
                                     >
                                         <img 
                                             src={fixPhotoUrl(currentPlayer.photo_url, currentPlayer.first_name)} 
-                                            style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                                            style={{ width: '100%', height: '100%', objectFit: 'cover', willChange: 'transform' }} 
                                             alt="" 
+                                            loading="eager"
+                                            fetchPriority="high"
                                             onError={(e) => { (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentPlayer.first_name}`; }}
                                         />
-                                        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 25%, transparent 100%)' }} />
+                                        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 25%, transparent 100%)', pointerEvents: 'none' }} />
                                     </motion.div>
 
                                     {/* SOLD STAMP */}
                                     <AnimatePresence>
                                         {showStamp && (
                                             <motion.div
-                                                initial={{ scale: 4, opacity: 0, rotate: -45, x: '-50%', y: '-50%' }}
+                                                initial={{ scale: 4, opacity: 0.15, rotate: -45, x: '-50%', y: '-50%' }}
                                                 animate={{ scale: 1, opacity: 1, rotate: -25, x: '-50%', y: '-50%' }}
                                                 style={{
                                                     position: 'absolute',
                                                     top: '40%',
                                                     left: '50%',
-                                                    zIndex: 200,
+                                                    zIndex: 10,
                                                     pointerEvents: 'none',
                                                     width: '800px',
                                                 }}
@@ -309,7 +375,7 @@ export default function DisplayAuctionPage() {
                                         transition={{ delay: 0.2 }}
                                     >
                                         <h1 style={{ 
-                                            fontSize: '10rem', 
+                                            fontSize: '13rem', 
                                             fontWeight: 950, 
                                             margin: 0, 
                                             lineHeight: 1,
@@ -335,7 +401,7 @@ export default function DisplayAuctionPage() {
                                             textTransform: 'uppercase',
                                             letterSpacing: '5px'
                                         }}>
-                                            {currentPlayer.category || 'PLAYER'}
+                                            {currentPlayer.role || 'PLAYER'}
                                         </div>
                                     </motion.div>
 
@@ -348,7 +414,7 @@ export default function DisplayAuctionPage() {
                                             backdropFilter: 'blur(20px)'
                                         }}>
                                             <div style={{ fontSize: '1.2rem', color: 'rgba(255,255,255,0.5)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '5px' }}>Base Price</div>
-                                            <div style={{ fontSize: '4rem', fontWeight: 950 }}>{currentPlayer.base_price} <span style={{ fontSize: '2rem', color: COLORS.electricBlue }}>PUSHP</span></div>
+                                            <div style={{ fontSize: '5.5rem', fontWeight: 950 }}>{currentPlayer.base_price} <span style={{ fontSize: '3rem', color: COLORS.electricBlue }}>PUSHP</span></div>
                                         </div>
                                         
                                         {currentPlayer.was_present_kc3 && (
@@ -360,7 +426,7 @@ export default function DisplayAuctionPage() {
                                                 backdropFilter: 'blur(20px)'
                                             }}>
                                                 <div style={{ fontSize: '1.2rem', color: COLORS.electricBlue, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '5px' }}>Last KC3 Status</div>
-                                                <div style={{ fontSize: '4rem', fontWeight: 950 }}>{currentPlayer.was_present_kc3.toUpperCase()}</div>
+                                                <div style={{ fontSize: '5.5rem', fontWeight: 950 }}>{currentPlayer.was_present_kc3.toUpperCase()}</div>
                                             </div>
                                         )}
                                     </div>
@@ -394,11 +460,11 @@ export default function DisplayAuctionPage() {
                                                         key={auctionState?.current_highest_bid}
                                                         initial={{ y: 20, opacity: 0 }}
                                                         animate={{ y: 0, opacity: 1 }}
-                                                        style={{ fontSize: '12rem', fontWeight: 950, lineHeight: 0.9, color: COLORS.white }}
+                                                        style={{ fontSize: '15rem', fontWeight: 950, lineHeight: 0.9, color: COLORS.white }}
                                                     >
                                                         {auctionState?.current_highest_bid || 0}
                                                     </motion.div>
-                                                    <div style={{ fontSize: '4rem', fontWeight: 950, color: highestBidTeam ? COLORS.neonGreen : 'rgba(255,255,255,0.2)' }}>PUSHP</div>
+                                                    <div style={{ fontSize: '5.5rem', fontWeight: 950, color: highestBidTeam ? COLORS.neonGreen : 'rgba(255,255,255,0.2)' }}>PUSHP</div>
                                                 </div>
 
                                                 {highestBidTeam && (
@@ -503,25 +569,48 @@ export default function DisplayAuctionPage() {
                 overflow: 'hidden',
                 zIndex: 500
             }}>
-                <div style={{ display: 'flex', whiteSpace: 'nowrap', width: '100%' }}>
-                    <div className="ticker-content" style={{ display: 'flex', alignItems: 'center', animation: 'ticker-scroll 30s linear infinite' }}>
-                        {[1, 2, 3, 4].map(i => (
-                            <span key={i} style={{ 
-                                fontSize: '4rem', 
+                <div className="ticker-content" style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    animation: 'ticker-scroll 30s linear infinite', 
+                    whiteSpace: 'nowrap',
+                    willChange: 'transform'
+                }}>
+                    {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', paddingRight: '80px' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', height: '100%' }}>
+                                <img 
+                                    src="/logo.png" 
+                                    style={{ 
+                                        height: '100px', 
+                                        width: 'auto', 
+                                        margin: '0 40px',
+                                        verticalAlign: 'middle',
+                                        display: 'inline-flex',
+                                        alignItems: 'center'
+                                    }} 
+                                    alt="Logo"
+                                />
+                            </span>
+                            <span style={{ 
+                                fontSize: '5.5rem', 
                                 fontWeight: 950, 
                                 color: COLORS.white, 
-                                letterSpacing: '15px', 
-                                paddingRight: '150px',
+                                letterSpacing: '18px', 
                                 background: `linear-gradient(to bottom, #fff 0%, #aaa 100%)`,
                                 WebkitBackgroundClip: 'text',
-                                WebkitTextFillColor: 'transparent'
+                                WebkitTextFillColor: 'transparent',
+                                display: 'inline-flex',
+                                alignItems: 'center'
                             } as any}>
                                 {BROADCAST_NAME}
                             </span>
-                        ))}
-                    </div>
+                        </div>
+                    ))}
                 </div>
             </div>
         </main>
     );
-}
+});
+
+export default DisplayAuctionPage;

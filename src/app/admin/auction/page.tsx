@@ -21,13 +21,13 @@ import {
 import { getPurplePushp, getNextBid, MAX_SQUAD_SIZE } from '@/lib/auction-logic';
 
 const TEAM_ORDER = [
-    'SHAURYAM', 
-    'DIVYAM', 
-    'SATYAM', 
-    'DASHATYAM', 
-    'DHAIRYAM', 
-    'GYANAM', 
-    'AISHWARYAM', 
+    'SHAURYAM',
+    'DIVYAM',
+    'SATYAM',
+    'DASHATYAM',
+    'DHAIRYAM',
+    'GYANAM',
+    'AISHWARYAM',
     'ASTIKAYAM'
 ];
 
@@ -43,7 +43,7 @@ function TimeSince({ dateString }: { dateString: string }) {
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
-    
+
     let text = '';
     if (hours > 0) text = `${hours}h ${minutes % 60}m ago`;
     else if (minutes > 0) text = `${minutes}m ${seconds % 60}s ago`;
@@ -109,12 +109,12 @@ function AdminAuctionContent() {
                     const { count } = await supabase.from('players').select('*', { count: 'exact', head: true }).eq('team_id', t.id).eq('auction_status', 'sold');
                     return { ...t, squad_count: count || 0 };
                 }));
-                
+
                 // Sort by fixed TEAM_ORDER
                 const sortedTeams = [...teamsWithSquadCount].sort((a, b) => {
                     return TEAM_ORDER.indexOf(a.name) - TEAM_ORDER.indexOf(b.name);
                 });
-                
+
                 setTeams(sortedTeams);
             }
         } catch (err) {
@@ -229,9 +229,9 @@ function AdminAuctionContent() {
 
     const currentPlayer = players.find(p => p.id === auctionState?.current_player_id);
     const winningTeam = teams.find(t => t.id === auctionState?.highest_bid_team_id);
-    
+
     // Support Slots and Re-Auction Pool
-    const poolPlayers = selectedSlot === 'Re-Auction' 
+    const poolPlayers = selectedSlot === 'Re-Auction'
         ? players.filter(p => p.auction_status === 'unsold')
         : selectedSlot === 'All'
             ? players.filter(p => p.auction_status === 'pending')
@@ -418,12 +418,12 @@ function AdminAuctionContent() {
                                 <h3 style={{ fontSize: '1.2rem', fontWeight: 950, display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--primary)' }}>
                                     <Zap size={20} fill="var(--primary)" /> LIVE BID STATUS
                                 </h3>
-                                <div style={{ 
-                                    padding: '5px 12px', 
-                                    borderRadius: '50px', 
-                                    background: auctionState?.status === 'BIDDING' ? '#00ff80' : auctionState?.status === 'SOLD' ? '#ff4b4b' : '#666', 
-                                    color: '#000', 
-                                    fontSize: '0.7rem', 
+                                <div style={{
+                                    padding: '5px 12px',
+                                    borderRadius: '50px',
+                                    background: auctionState?.status === 'BIDDING' ? '#00ff80' : auctionState?.status === 'SOLD' ? '#ff4b4b' : '#666',
+                                    color: '#000',
+                                    fontSize: '0.7rem',
                                     fontWeight: 900,
                                     textTransform: 'uppercase'
                                 }}>
@@ -475,12 +475,12 @@ function AdminAuctionContent() {
                                         {recentBids.length > 0 ? recentBids.map((bid, i) => {
                                             const team = teams.find(t => t.id === bid.team_id);
                                             return (
-                                                <div key={i} style={{ 
-                                                    display: 'flex', 
-                                                    justifyContent: 'space-between', 
-                                                    alignItems: 'center', 
-                                                    padding: '10px 15px', 
-                                                    background: i === 0 ? 'rgba(255, 215, 0, 0.1)' : 'rgba(255,255,255,0.02)', 
+                                                <div key={i} style={{
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center',
+                                                    padding: '10px 15px',
+                                                    background: i === 0 ? 'rgba(255, 215, 0, 0.1)' : 'rgba(255,255,255,0.02)',
                                                     borderRadius: '10px',
                                                     border: i === 0 ? '1px solid rgba(255, 215, 0, 0.2)' : '1px solid transparent'
                                                 }}>
@@ -542,7 +542,7 @@ function AdminAuctionContent() {
                         <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} style={{ position: 'fixed', top: 0, right: 0, height: '100vh', width: '500px', background: '#0a0a0a', zIndex: 1001, padding: '40px', borderLeft: '1px solid rgba(255,255,255,0.1)' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
                                 <h2 style={{ fontSize: '1.8rem', fontWeight: 950 }}>SELECT PLAYER</h2>
-                                <button 
+                                <button
                                     onClick={() => {
                                         if (poolPlayers.length === 0) {
                                             alert('No players left in this category!');
@@ -558,12 +558,12 @@ function AdminAuctionContent() {
                                     🎲 RANDOM
                                 </button>
                             </div>
-                            
+
                             <div style={{ marginBottom: '25px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                                 <label style={{ fontSize: '0.75rem', fontWeight: 900, color: 'var(--primary)', letterSpacing: '1px' }}>CHOOSE SLOT / POOL</label>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                                     {['All', ...Array.from(new Set(players.map(p => p.category || 'Unassigned'))), 'Re-Auction'].map(slot => (
-                                        <button 
+                                        <button
                                             key={slot}
                                             onClick={() => setSelectedSlot(slot)}
                                             style={{
@@ -577,9 +577,9 @@ function AdminAuctionContent() {
                                             }}
                                         >
                                             {slot} ({
-                                                slot === 'Re-Auction' 
-                                                ? players.filter(p => p.auction_status === 'unsold').length
-                                                : players.filter(p => (slot === 'All' || p.category === slot) && p.auction_status === 'pending').length
+                                                slot === 'Re-Auction'
+                                                    ? players.filter(p => p.auction_status === 'unsold').length
+                                                    : players.filter(p => (slot === 'All' || p.category === slot) && p.auction_status === 'pending').length
                                             })
                                         </button>
                                     ))}
