@@ -128,6 +128,32 @@ function RegistrationControlContent() {
         }, 'image/jpeg', 0.8);
     };
 
+    const bulkPushAll = async () => {
+        const pending = registrations.filter(p => !p.is_pushed);
+        if (pending.length === 0) {
+            alert("No pending players to push.");
+            return;
+        }
+
+        if (!confirm(`🚀 Push ALL ${pending.length} pending players to the main player pool?`)) return;
+        
+        setLoading(true);
+        try {
+            const res = await fetch('/api/admin/bulk-push', { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                alert(`✅ SUCCESS!\n\n${data.message}`);
+                fetchRegistrations();
+            } else {
+                throw new Error(data.error || 'Bulk push failed');
+            }
+        } catch (err: any) {
+            alert('Error: ' + err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const pushToPool = async (player: any) => {
         if (!confirm(`Push ${player.name} to the main player pool?`)) return;
         setPushingId(player.id);
@@ -453,6 +479,31 @@ function RegistrationControlContent() {
                         </tbody>
                     </table>
                 </div>
+
+                <div style={{ marginTop: '30px', display: 'flex', justifyContent: 'center' }}>
+                    <button
+                        onClick={bulkPushAll}
+                        disabled={loading || registrations.filter(p => !p.is_pushed).length === 0}
+                        style={{
+                            padding: '18px 40px',
+                            borderRadius: '16px',
+                            background: 'var(--primary)',
+                            color: '#000',
+                            fontWeight: 950,
+                            fontSize: '1rem',
+                            border: 'none',
+                            cursor: loading ? 'not-allowed' : 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '12px',
+                            boxShadow: '0 10px 30px rgba(255, 215, 0, 0.2)',
+                            transition: 'all 0.3s ease'
+                        }}
+                        className="bulk-push-btn"
+                    >
+                        <Upload size={20} /> PUSH ALL PENDING TO POOL ({registrations.filter(p => !p.is_pushed).length})
+                    </button>
+                </div>
             </div>
 
             {/* Upload Modal */}
@@ -556,6 +607,13 @@ function RegistrationControlContent() {
                     background: rgba(255,215,0,0.05) !important;
                     border-color: var(--primary) !important;
                     transform: translateY(-2px);
+                }
+                .bulk-push-btn:hover {
+                    transform: translateY(-4px);
+                    box-shadow: 0 15px 40px rgba(255, 215, 0, 0.4);
+                }
+                .bulk-push-btn:active {
+                    transform: translateY(-1px);
                 }
             `}</style>
         </main>

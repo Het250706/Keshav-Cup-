@@ -150,7 +150,10 @@ function AdminLiveScoreContent() {
             alert(`Error deleting match: ${error.message}. You might need to delete related data first if CASCADE is not enabled.`);
         } else {
             alert('Match deleted successfully');
-            await fetchMatches();
+            await Promise.all([
+                fetchMatches(),
+                fetchTournamentStats()
+            ]);
         }
     };
 
@@ -430,52 +433,57 @@ function AdminLiveScoreContent() {
     };
 
     const handleUndo = async () => {
-        if (!currentInnings || !confirm('Undo last ball?')) return;
+        if (!currentInnings || !activeMatch) return;
+        
+        // 1. Confirm with user
+        if (!confirm('🚨 Are you sure you want to UNDO the last ball? This action will reverse all statistics recorded for the last delivery.')) return;
 
-        const { data: lastEvent } = await supabase
-            .from('match_events')
-            .select('*')
-            .eq('match_id', activeMatch.id)
-            .eq('innings_number', currentInnings.innings_number)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
+        try {
+            setLoading(true);
 
-        if (!lastEvent) {
-            alert('No balls to undo');
-            return;
+            // 2. Call the Atomic Undo RPC
+            const { data, error } = await supabase.rpc('undo_last_ball', {
+                p_match_id: activeMatch.id,
+                p_innings_id: currentInnings.id
+            });
+
+            if (error) {
+                console.error('UNDO_RPC_ERROR:', error);
+                alert(`Error during undo: ${error.message}`);
+                return;
+            }
+
+            if (data && data.success) {
+                // 3. Success! Restore the striker and bowler selection
+                // This is crucial if a wicket fell or a bowler was cleared after an over
+                if (data.restored_striker) setStrikerId(data.restored_striker);
+                if (data.restored_bowler) setBowlerId(data.restored_bowler);
+
+                // 4. Refresh Match Events to update UI
+                await fetchMatchEvents(activeMatch.id);
+
+                // 5. Refresh current innings state to reflect reverted score/wickets/overs
+                const { data: refreshedInn } = await supabase
+                    .from('innings')
+                    .select('*')
+                    .eq('id', currentInnings.id)
+                    .single();
+                
+                if (refreshedInn) setCurrentInnings(refreshedInn);
+
+                // 6. Refresh tournament stats for consistency
+                fetchTournamentStats();
+                
+                alert('✅ Last ball undone successfully. Statistics reverted.');
+            } else {
+                alert(`⚠️ ${data?.message || 'Failed to undo last ball.'}`);
+            }
+        } catch (err: any) {
+            console.error('HANDLE_UNDO_CRITICAL_ERROR:', err);
+            alert(`A critical error occurred: ${err.message}`);
+        } finally {
+            setLoading(false);
         }
-
-        await supabase.from('match_events').delete().eq('id', lastEvent.id);
-
-        const { data: allEvents } = await supabase
-            .from('match_events')
-            .select('*')
-            .eq('match_id', activeMatch.id)
-            .eq('innings_number', currentInnings.innings_number);
-
-        let totalRuns = 0;
-        let totalWickets = 0;
-        let legalBalls = 0;
-
-        allEvents?.forEach((e: any) => {
-            totalRuns += (e.runs_off_bat || 0) + (e.extras || 0);
-            if (e.is_wicket) totalWickets++;
-            if (e.extra_type !== 'wide' && e.extra_type !== 'nb') legalBalls++;
-        });
-
-        const overs = Math.floor(legalBalls / 6) + ((legalBalls % 6) / 10);
-
-        await supabase.from('innings').update({
-            runs: totalRuns,
-            wickets: totalWickets,
-            overs: overs
-        }).eq('id', currentInnings.id);
-
-        fetchMatchEvents(activeMatch.id);
-        const { data: refreshedInn } = await supabase.from('innings').select('*').eq('id', currentInnings.id).single();
-        if (refreshedInn) setCurrentInnings(refreshedInn);
-        alert('Last ball undone successfully');
     };
 
     const endInnings = async () => {
@@ -563,7 +571,10 @@ function AdminLiveScoreContent() {
                 await supabase.from('innings').update({ is_completed: true }).eq('id', currentInnings.id);
 
                 alert(resultMessage);
-                await fetchMatches();
+                await Promise.all([
+                    fetchMatches(),
+                    fetchTournamentStats()
+                ]);
                 setView('matches');
             }
         } catch (err: any) {
@@ -643,7 +654,9 @@ function AdminLiveScoreContent() {
                         <div className="glass" style={{ padding: '20px', borderRadius: '20px', textAlign: 'center' }}>
                             <Trophy size={24} color="var(--primary)" style={{ marginBottom: '10px' }} />
                             <div style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--text-muted)' }}>BEST BATSMAN</div>
-                            <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>{tournamentStats[0]?.first_name || '---'} ({tournamentStats[0]?.total_runs || 0} Runs)</div>
+                            <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>
+                                {tournamentStats[0]?.total_runs > 0 ? `${tournamentStats[0].first_name} (${tournamentStats[0].total_runs} Runs)` : '---'}
+                            </div>
                         </div>
                         <div className="glass" style={{ padding: '20px', borderRadius: '20px', textAlign: 'center', border: '1px solid rgba(0, 255, 128, 0.2)' }}>
                             <Target size={24} color="#00ff80" style={{ marginBottom: '10px' }} />
@@ -651,7 +664,7 @@ function AdminLiveScoreContent() {
                             <div style={{ fontSize: '1.2rem', fontWeight: 900, color: '#00ff80' }}>
                                 {(() => {
                                     const best = [...tournamentStats].sort((a, b) => b.total_wickets - a.total_wickets)[0];
-                                    return best ? `${best.first_name} (${best.total_wickets} Wkts)` : '---';
+                                    return best && best.total_wickets > 0 ? `${best.first_name} (${best.total_wickets} Wkts)` : '---';
                                 })()}
                             </div>
                         </div>
@@ -660,8 +673,8 @@ function AdminLiveScoreContent() {
                             <div style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--text-muted)', textTransform: 'uppercase' }}>PLAYER OF TOURNAMENT</div>
                             <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--primary)' }}>
                                 {(() => {
-                                    const best = [...tournamentStats].sort((a, b) => b.pot_score - a.pot_score)[0];
-                                    return best ? `${best.first_name}` : '---';
+                                    const best = [...tournamentStats].sort((a, b) => (b.pot_score || 0) - (a.pot_score || 0))[0];
+                                    return best && best.pot_score > 0 ? `${best.first_name}` : '---';
                                 })()}
                             </div>
                         </div>
@@ -1103,10 +1116,22 @@ function AdminLiveScoreContent() {
                                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
                                         <button
                                             onClick={handleUndo}
+                                            disabled={loading || matchEvents.filter(e => e.innings_id === currentInnings.id).length === 0}
                                             className="btn-secondary"
-                                            style={{ padding: '15px', fontSize: '0.8rem', fontWeight: 900, borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}
+                                            style={{ 
+                                                padding: '15px', 
+                                                fontSize: '0.8rem', 
+                                                fontWeight: 900, 
+                                                borderRadius: '15px', 
+                                                display: 'flex', 
+                                                alignItems: 'center', 
+                                                justifyContent: 'center', 
+                                                gap: '5px',
+                                                opacity: (loading || matchEvents.filter(e => e.innings_id === currentInnings.id).length === 0) ? 0.4 : 1,
+                                                cursor: (loading || matchEvents.filter(e => e.innings_id === currentInnings.id).length === 0) ? 'not-allowed' : 'pointer'
+                                            }}
                                         >
-                                            <RefreshCw size={14} /> UNDO
+                                            {loading ? <Activity size={14} className="rotate" /> : <RefreshCw size={14} />} UNDO
                                         </button>
                                         <button
                                             onClick={endInnings}
@@ -1169,8 +1194,6 @@ function AdminLiveScoreContent() {
                                     <select style={inputStyle} value={selectedWicketType} onChange={(e: any) => setSelectedWicketType(e.target.value)}>
                                         <option>Bowled</option>
                                         <option>Caught</option>
-                                        <option>LBW</option>
-                                        <option>Run Out</option>
                                         <option>Stumped</option>
                                     </select>
                                 </div>

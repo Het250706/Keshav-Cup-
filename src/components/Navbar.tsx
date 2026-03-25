@@ -134,16 +134,16 @@ export default function Navbar() {
         }}>
             <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{
-                    width: '45px',
-                    height: '45px',
+                    width: '65px',
+                    height: '65px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                 }}>
                     <img 
                         src="/logo.png" 
-                        alt="Logo" 
-                        style={{ width: '100%', height: 'auto' }} 
+                        alt="Keshav Cup Logo" 
+                        style={{ width: '100%', height: 'auto', filter: 'drop-shadow(0 0 10px rgba(255,215,0,0.3))' }} 
                     />
                 </div>
                 <span className="title-gradient" style={{ fontSize: '1.2rem', letterSpacing: '1px', fontWeight: 900 }}>KESHAV CUP</span>

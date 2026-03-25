@@ -238,18 +238,18 @@ function AdminDashboardContent() {
         }
     };
 
-    const migratePhotos = async () => {
-        if (!confirm('Migrate all Google Drive photos to Supabase Storage? This will make image loading much faster and more stable.')) return;
+    const bulkPushPlayers = async () => {
+        if (!confirm(`🚀 PUSH ALL PENDING REGISTRATIONS TO PLAYER POOL?\n\nThis will take all players from Registration Control and move them into the main Auction Pool. Continue?`)) return;
 
         setSyncing(true);
         try {
-            const res = await fetch('/api/admin/migrate-bulk-photos', { method: 'POST' });
+            const res = await fetch('/api/admin/bulk-push', { method: 'POST' });
             const data = await res.json();
             if (data.success) {
-                alert(`✅ Migration Complete!\n\nMigrated: ${data.migrated} photos\nSkipped: ${data.skipped} (already migrated or empty)`);
+                alert(`✅ SUCCESS!\n\n${data.message}`);
                 fetchData();
             } else {
-                throw new Error(data.error || 'Migration failed');
+                throw new Error(data.error || 'Bulk push failed');
             }
         } catch (err: any) {
             alert('Error: ' + err.message);
@@ -257,6 +257,8 @@ function AdminDashboardContent() {
             setSyncing(false);
         }
     };
+
+
 
     const currentPlayer = players.find(p => p.id === auctionState?.current_player_id);
 
@@ -664,7 +666,7 @@ function AdminDashboardContent() {
                                         ) : (
                                             <>
                                                 <p style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: '25px' }}>
-                                                    CONSOLE IDLE {selectedSlot !== 'All' ? `(${selectedSlot})` : ''}
+                                                    CONSOLE {selectedSlot !== 'All' ? `(${selectedSlot})` : ''}
                                                 </p>
                                                 <button
                                                     onClick={drawRandom}
@@ -748,12 +750,12 @@ function AdminDashboardContent() {
                                 </div>
                                 <div style={{ display: 'flex', gap: '15px' }}>
                                     <button
-                                        onClick={migratePhotos}
+                                        onClick={bulkPushPlayers}
                                         disabled={syncing}
                                         style={{
-                                            background: 'rgba(56, 189, 248, 0.1)',
-                                            color: '#38bdf8',
-                                            border: '1px solid rgba(56, 189, 248, 0.3)',
+                                            background: 'rgba(255, 215, 0, 0.1)',
+                                            color: 'var(--primary)',
+                                            border: '1px solid rgba(255, 215, 0, 0.3)',
                                             padding: '10px 20px',
                                             borderRadius: '12px',
                                             fontSize: '0.75rem',
@@ -761,10 +763,11 @@ function AdminDashboardContent() {
                                             cursor: syncing ? 'not-allowed' : 'pointer',
                                             display: 'flex',
                                             alignItems: 'center',
-                                            gap: '8px'
+                                            gap: '8px',
+                                            boxShadow: '0 0 15px rgba(255, 215, 0, 0.1)'
                                         }}
                                     >
-                                        <Download size={14} /> {syncing ? 'PROCESSING...' : 'STABILIZE PHOTOS'}
+                                        <UserPlus size={14} /> {syncing ? 'PUSHING...' : 'PUSH ALL TO POOL'}
                                     </button>
                                     <button
                                         onClick={auditBudgets}
